@@ -394,6 +394,33 @@ fun SettingsScreen(
                         )
                     }
 
+                    if (isFloatingRunning) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { FloatingAssistantManager.showFloatingService(context) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("展开对话", fontSize = 11.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { FloatingAssistantManager.dockFloatingService(context) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("贴边隐藏", fontSize = 11.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { FloatingAssistantManager.hideFloatingService(context) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("完全隐身", fontSize = 11.sp)
+                            }
+                        }
+                    }
+
                     if (!hasOverlay) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Button(

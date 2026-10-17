@@ -32,6 +32,9 @@
     <!-- Floating Window Overlay Permission (For global desktop assistant) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Notification Permission (For persistent summon & hide control) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".AIAgentApplication"
         android:allowBackup="true"

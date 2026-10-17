@@ -39,13 +39,12 @@
   - 纯本地引擎处理：相册扫描、SHA-256 分块查重、dHash 相似度聚类全部在设备端离线运行；
   - 极精简工具返回协议：大文件、重复分组、相似照片、截图及 APK 列表回传数量合理封顶（仅返回前 4~8 项关键摘要），剔除臃肿字段；
   - 新增 `query_file_detail` 单文件按需查询工具，仅在用户指明要查看某具体文件时调取，彻底根除 Token 爆炸风险。
-- [x] **桌面全局悬浮窗跨屏交互助手 (Floating Assistant Window)**：
-  - 基于 `FloatingAssistantService` 与 `WindowManager` 实现全局桌面悬浮交互；
-  - 折叠态：支持任意屏幕位置手指拖拽与吸附；
-  - 展开态：Material 3 迷你对话窗，集成快速动作 Chips、多轮对话流、实时执行进度卡片与操作确认预览卡片；
-  - 软键盘焦点与外部点击收起（`ACTION_OUTSIDE`）处理自适应；
-  - 支持设置页面手动开关、聊天指令（“打开悬浮窗”）及大模型 Function Calling（`open_floating_window`）无缝唤起；
-  - 荣耀 VKJ-AN00 (Android 16) `SYSTEM_ALERT_WINDOW` 权限生效，服务实测启动成功并生成有效悬浮图层。
+- [x] **桌面全局悬浮窗防遮挡与四态伸缩架构 (Floating Assistant Window Overhaul)**：
+  - 重塑四态智能伸缩模型（展开对话态 `EXPANDED` / 贴边极窄把手 `DOCKED_TAB` / 灵动微型胶囊 `COLLAPSED_PILL` / 完全后台隐身 `HIDDEN`）；
+  - **贴边极窄把手**：仅占屏幕边缘 14dp 磨砂胶囊拉手，居侧边零遮挡，轻触把手瞬间展开，点击外部（`ACTION_OUTSIDE`）自动贴边收纳；
+  - **黄金半屏比例**：展开窗压缩至 52% 屏幕高度与 88% 宽度（最大 400dp），22dp 毛玻璃圆角卡片，绝不遮挡全屏；
+  - **随时随地唤出**：系统通知栏常驻卡片一键唤出 / 贴边 / 隐身，标题栏与设置页全套直控，语音/文本“贴边”、“隐身”、“打开悬浮窗”秒级响应；
+  - 荣耀 VKJ-AN00 (Android 16) `SYSTEM_ALERT_WINDOW` 与 `POST_NOTIFICATIONS` 生效，实测触控与伸缩闭环 100% 成功。
 - [x] **全场景“开新对话”与上下文物理重置闭环 (New Chat & Context Reset)**：
   - 主应用助手页面顶部新增 Header Bar，集成 `FilledTonalButton("开新对话")` 按钮及快捷 Chip；
   - 桌面悬浮窗标题栏集成 `IconButton("开新对话")` 图标按钮及悬浮快捷 Chip；
@@ -100,5 +99,5 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start
 ## 5. 当前代码与提交信息
 
 - **当前分支**：`master`
-- **最新提交 Commit**：`8065ded`
+- **最新提交 Commit**：`836cb83`
 - **最新代码状态**：所有代码、资源、配置与文档均已就绪并全量构建并在真机上验证通过。

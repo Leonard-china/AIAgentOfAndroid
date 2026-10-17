@@ -557,11 +557,23 @@ class AgentOrchestrator(
                         sender = "ASSISTANT",
                         content = "⚙️ 桌面悬浮窗需要「显示在其他应用上层」权限。已为您调起系统权限设置页面，开启后即可使用。"
                     )
-                } else {
-                    FloatingAssistantManager.startFloatingService(context)
+                } else if (lower.contains("隐藏") || lower.contains("收起") || lower.contains("隐身")) {
+                    FloatingAssistantManager.hideFloatingService(context)
                     AiMessage(
                         sender = "ASSISTANT",
-                        content = "🎉 桌面悬浮窗助手已启动！您现在可以返回桌面或在任何第三方应用中使用屏幕悬浮球随时与我对话。"
+                        content = "👁️ 已为您将桌面悬浮窗完全隐藏！下拉系统通知栏或随时对我说“打开悬浮窗”即可一键唤出。"
+                    )
+                } else if (lower.contains("贴边") || lower.contains("靠边")) {
+                    FloatingAssistantManager.dockFloatingService(context)
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "📌 已为您将悬浮窗收纳为屏幕边缘极窄磨砂拉手，绝不遮挡视野，轻触边缘拉手即可唤出！"
+                    )
+                } else {
+                    FloatingAssistantManager.showFloatingService(context)
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "🎉 桌面悬浮窗助手已在屏幕上展开！您可以随时向我发送指令，或点击顶部【贴边】、【隐身】按钮收纳它。"
                     )
                 }
             }
