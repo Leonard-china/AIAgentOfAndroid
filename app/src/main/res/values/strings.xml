@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">AI 文件助手</string>
+    <string name="accessibility_service_label">AI 文件助手 - 屏幕辅助</string>
+    <string name="accessibility_service_description">在用户主动授权与下达明确指令时，辅助打开系统存储设置页面并协助定位文件与相册操作。默认关闭，不会收集用户敏感隐私。</string>
+</resources>

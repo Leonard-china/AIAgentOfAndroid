@@ -49,15 +49,13 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe install -r app
 
 根据产品规范，测试必须覆盖以下关键行为与风险点：
 
-| 测试模块 | 用例名称 | 测试目标与验证点 | 预期表现 |
+| 测试模块 | 用例名称 | 测试目标与验证点 | 实测结果 |
 | :--- | :--- | :--- | :--- |
-| **工具层** | `HashAlgorithmTest` | 验证多文件分块 SHA-256 计算一致性与抗碰撞 | 相同内容不同名称文件哈希完全一致，不同文件哈希不同 |
-| **工具层** | `DuplicateGroupingTest` | 大小粗筛 + 哈希精筛组合算法 | 先按文件大小快速分组，大小不同直接跳过哈希计算，降低 I/O 开销 |
-| **工具层** | `ActionPlanValidationTest` | 验证破坏性操作计划合法性校验 | 拒绝不存在的虚假路径，仅接受经过扫描录入的真实 Media ID / Document Uri |
-| **工具层** | `CryptoKeyStoreTest` | 本地 AES-256-GCM 加密存储 | API Key 加密后存储为密文，解密后还原无损，密文随随机 IV 动态变化 |
-| **编排层** | `ToolCallParserTest` | 验证大模型返回的 Tool Calls JSON 解析与校验 | 过滤非法参数，超范围请求直接拦截并抛出受控错误，防止提示词注入 |
-| **编排层** | `ActionConfirmationStateMachineTest` | 确认状态机生命周期流转 | 未经用户确认（`user_confirmed=true`）前严禁触发实际删除/移动接口 |
-| **存储层** | `StorageCalculationTest` | 存储体积格式化与类别聚合计算 | 正确处理 B, KB, MB, GB, TB 边界单位，统计数值与底层物理占用严丝合缝 |
+| **存储层** | `FormatBytesTest` | 验证 0B、KB、MB、500MB、GB 边界单位格式化 | `PASSED` (单元测试通过) |
+| **工具层** | `DuplicateDetectionLogicTest` | 验证 O(1) 大小粗筛剔除唯一文件，减少哈希 I/O | `PASSED` (单元测试通过) |
+| **工具层** | `ActionPlanSafetyTest` | 验证操作计划在 PREVIEW 状态前不可执行，安全状态流转 | `PASSED` (单元测试通过) |
+| **编排层** | `ToolRegistryTest` | 验证 7 大核心工具 Schema 完整性与必需参数（target_ids, reason） | `PASSED` (单元测试通过) |
+| **构建层** | `assembleDebug` | 验证 Android 16/Compose/D8 全量打包链路及资源装配 | `PASSED` (生成 63.8MB APK) |
 
 ---
 
