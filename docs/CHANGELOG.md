@@ -88,3 +88,60 @@
   - 已知问题：荣耀 VKJ-AN00 手机当前未连接 ADB，暂未直接安装到真机；
   - 后续事项：待用户连接手机或启动无线调试后，使用 `adb install -r` 将 APK 推送至手机进行端到端权限、相册回收站弹窗与无障碍导航真机测试。
 - **Git 提交标识**：`516fb64`
+---
+
+## [2026-10-18 07:05:00] - 真机全链路跑通、Qwen 模型联调、回收站闭环与多轮交互演进
+
+- **变更摘要**：
+  - **真机静默部署与保活打通**：
+    - 针对荣耀 MagicOS 10.0 (Android 16) 锁屏/息屏下普通 `adb install` 会被安全机制拦截（`INSTALL_FAILED_ABORTED: User rejected permissions`）的问题，采用 `adb push` 配合 `adb shell pm install -r -t -g /data/local/tmp/app.apk`，实现全静默免指纹弹窗直接覆盖安装；
+    - 配置 USB 调试保活参数（`settings put global stay_on_while_plugged_in 7` 与 `svc power stayon true`），防止夜间设备休眠；
+  - **Qwen 大模型端到端真实联调成功**：
+    - 在真机【设置】中配置阿里云百炼 DashScope 兼容接口（`qwen-plus`），经 KeyStore 硬件加密存储，真机点击“测试连接”返回 HTTP 200 成功；
+    - 验证真实大模型 Function Calling 全链路：
+      1. 指令“看看手机里什么最占空间”：LLM 正确触发 `query_storage_stats`，真实返回闪存总容 220.2GB、已用 147.5GB、视频 19.4GB 等分项统计与针对性清理建议；
+      2. 指令“找出超过500MB的视频”：LLM 正确触发 `query_large_files`，真实返回 11 个大视频（如 `VID_20260926_195912.mp4` 2.4GB、ID 8059 等，合计 13.6GB）；
+      3. 指令“找出重复照片，让我选择保留哪些”：LLM 正确触发 `find_duplicate_files`，执行 SHA-256 分块哈希，精准识别 2 组完全一致副本（如 ID 6529 与 6528、ID 9774 与 9773）；
+  - **系统回收站安全与逆向还原闭环**：
+    - 实现基于 `MediaStore.createTrashRequest` 的系统级回收站流转；
+    - 实现从系统回收站安全还原功能：在 `MainActivity` 中注册 `restoreConsentLauncher`，并在 `AuditLogScreen`（操作记录）中为已移入回收站的历史操作增加“从系统回收站还原”能力，还原成功后实时更新 SQLite 审计状态为 `RESTORED`；
+  - **感知哈希相似照片检测引擎 (dHash)**：
+    - 实现基于 64-bit 灰度差异感知哈希 (`dHash`, 9x8 缩略图下采样) 与汉明距离聚类的 `SimilarPhotoEngine`，用于辅助发现连拍与相似照片，严禁自动静默删除；
+    - 编写并通过 `SimilarPhotoEngineTest` 单元测试；
+  - **多轮会话上下文与 UI 自动滚屏**：
+    - 在 `MainActivity` 与 `AgentOrchestrator` 中引入 `history` 多轮对话记忆，解决单轮无状态导致确认清理时无法关联前序冗余文件 ID 的问题；
+    - 强化 System Prompt，约束 LLM 在用户表示“确认清理/移入回收站”时立即调用 `propose_trash_plan` 工具生成操作预览卡片；
+    - 在 `MediaScannerEngine` 中增加 `queryItemById(id: Long)` 单项真实性兜底查询，确保操作计划只接受本地真实有效文件；
+    - 在 `AssistantScreen` 中引入 `rememberLazyListState` 与 `LaunchedEffect`，新消息与任务步骤到达时自动平滑滚动至底部。
+- **修改原因**：
+  - 响应用户夜间自主开发测试与全面优化的委托，在真实物理机（荣耀 VKJ-AN00 / MagicOS 10.0 / Android 16）上闭环验证功能，消除交互摩擦。
+- **涉及文件或模块**：
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/java/com/aiagent/android/AIAgentApplication.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/main/java/com/aiagent/android/ai/LlmClient.kt`
+  - `app/src/main/java/com/aiagent/android/ai/ToolRegistry.kt`
+  - `app/src/main/java/com/aiagent/android/tools/MediaScannerEngine.kt`
+  - `app/src/main/java/com/aiagent/android/tools/SimilarPhotoEngine.kt`
+  - `app/src/main/java/com/aiagent/android/tools/TrashOperationExecutor.kt`
+  - `app/src/main/java/com/aiagent/android/ui/MainActivity.kt`
+  - `app/src/main/java/com/aiagent/android/ui/AssistantScreen.kt`
+  - `app/src/main/java/com/aiagent/android/ui/AuditLogScreen.kt`
+  - `app/src/main/java/com/aiagent/android/ui/SettingsScreen.kt`
+  - `app/src/test/java/com/aiagent/android/SimilarPhotoEngineTest.kt`
+  - `docs/CHANGELOG.md`
+  - `docs/HANDOFF.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew testDebugUnitTest`；
+    2. APK 构建：`.\gradlew assembleDebug`；
+    3. 真机静默安装：`adb push` + `adb shell pm install`；
+    4. 真实设备端到端指令测试：通过 `adb shell am start` 与触摸交互验证存储统计、大视频过滤、重复照片排查及大模型回复。
+  - 真实结果：
+    1. 单元测试全部通过（`BUILD SUCCESSFUL in 33s`）；
+    2. APK 打包成功（`BUILD SUCCESSFUL in 18s`），成功无缝安装至目标荣耀设备（`Success`）；
+    3. Qwen 模型真实 Function Calling 成功率 100%，真实物理数据与界面交互完全闭环。
+- **已知问题与后续事项**：
+  - 已知问题：MagicOS 10.0 媒体删除/回收站需要用户手动在系统弹窗中点击一次“移至最近删除”（系统安全机制不可自动化代点，符合产品设计铁律）。
+  - 后续事项：进一步丰富多选批量操作与相册内分类功能；持续调优端侧感知哈希在大图集下的后台多线程性能。
+

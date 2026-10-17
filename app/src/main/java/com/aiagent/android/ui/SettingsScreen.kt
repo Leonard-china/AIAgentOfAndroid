@@ -85,8 +85,46 @@ fun SettingsScreen(
                         text = "支持接入任意 OpenAI 兼容协议服务商（如 DeepSeek、通义千问等）。密钥通过硬件 Keystore 本地加密保存。",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
                     )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = baseUrl.contains("aliyuncs") || modelName.contains("qwen"),
+                            onClick = {
+                                baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                                modelName = "qwen-plus"
+                                vault.saveBaseUrl(baseUrl)
+                                vault.saveModelName(modelName)
+                            },
+                            label = { Text("通义千问 (Qwen)", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = baseUrl.contains("deepseek"),
+                            onClick = {
+                                baseUrl = "https://api.deepseek.com/v1"
+                                modelName = "deepseek-chat"
+                                vault.saveBaseUrl(baseUrl)
+                                vault.saveModelName(modelName)
+                            },
+                            label = { Text("DeepSeek", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = baseUrl.contains("openai.com"),
+                            onClick = {
+                                baseUrl = "https://api.openai.com/v1"
+                                modelName = "gpt-4o-mini"
+                                vault.saveBaseUrl(baseUrl)
+                                vault.saveModelName(modelName)
+                            },
+                            label = { Text("OpenAI", fontSize = 11.sp) }
+                        )
+                    }
 
                     OutlinedTextField(
                         value = baseUrl,

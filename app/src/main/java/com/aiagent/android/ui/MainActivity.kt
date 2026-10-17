@@ -1,5 +1,6 @@
 package com.aiagent.android.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -25,6 +26,8 @@ import androidx.lifecycle.lifecycleScope
 import com.aiagent.android.AIAgentApplication
 import com.aiagent.android.model.*
 import com.aiagent.android.tools.TrashOperationExecutor
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.launch
 
 enum class AppTab(val title: String, val icon: ImageVector) {
@@ -39,7 +42,9 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var trashConsentLauncher: ActivityResultLauncher<IntentSenderRequest>
+    private lateinit var restoreConsentLauncher: ActivityResultLauncher<IntentSenderRequest>
     private var pendingConsentPlan: ActionPlan? = null
+    private var pendingRestoreRecord: AuditRecord? = null
 
     // UI States
     private val messages = mutableStateListOf<AiMessage>()
@@ -51,6 +56,7 @@ class MainActivity : ComponentActivity() {
     private var isMediaLoading by mutableStateOf(false)
     private val auditRecords = mutableStateListOf<AuditRecord>()
     private var isPartialPhotoAccess by mutableStateOf(false)
+    private var currentTab by mutableStateOf(AppTab.ASSISTANT)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,9 +76,12 @@ class MainActivity : ComponentActivity() {
 
         refreshData()
 
+        intent?.getStringExtra("prompt")?.let { prompt ->
+            if (prompt.isNotBlank()) handleUserPrompt(prompt)
+        }
+
         setContent {
             AIAgentTheme {
-                var currentTab by remember { mutableStateOf(AppTab.ASSISTANT) }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -151,6 +160,7 @@ class MainActivity : ComponentActivity() {
                         AppTab.AUDIT -> AuditLogScreen(
                             auditRecords = auditRecords,
                             onRefresh = { loadAuditData() },
+                            onRestoreRecord = { record -> requestRestoreRecord(record) },
                             modifier = Modifier.padding(innerPadding)
                         )
                         AppTab.SETTINGS -> SettingsScreen(
@@ -205,6 +215,25 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> {}
                 }
+            }
+        }
+
+        restoreConsentLauncher = registerForActivityResult(
+            ActivityResultContracts.StartIntentSenderForResult()
+        ) { result ->
+            val record = pendingRestoreRecord
+            pendingRestoreRecord = null
+            if (record != null && result.resultCode == Activity.RESULT_OK) {
+                lifecycleScope.launch {
+                    val app = AIAgentApplication.instance
+                    app.dbHelper.updateAuditStatus(record.id, "RESTORED")
+                    Toast.makeText(this@MainActivity, "✅ 成功从系统回收站还原！", Toast.LENGTH_SHORT).show()
+                    loadStorageData()
+                    loadMediaData()
+                    loadAuditData()
+                }
+            } else if (result.resultCode != Activity.RESULT_OK) {
+                Toast.makeText(this@MainActivity, "已取消还原操作", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -304,6 +333,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleUserPrompt(prompt: String) {
+        val currentHistory = messages.toList()
         messages.add(AiMessage(sender = "USER", content = prompt))
         isProcessing = true
         activeSteps.clear()
@@ -312,6 +342,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val responseMsg = AIAgentApplication.instance.orchestrator.processGoal(
                     userPrompt = prompt,
+                    history = currentHistory,
                     onStepUpdated = { steps ->
                         activeSteps.clear()
                         activeSteps.addAll(steps)
@@ -392,5 +423,39 @@ class MainActivity : ComponentActivity() {
                 content = "已取消该操作，未做任何修改。"
             )
         )
+    }
+
+    private fun requestRestoreRecord(record: AuditRecord) {
+        val targets: List<ActionTarget> = runCatching {
+            val listType = object : TypeToken<List<ActionTarget>>() {}.type
+            Gson().fromJson<List<ActionTarget>>(record.detailsJson, listType)
+        }.getOrNull() ?: emptyList()
+
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "未找到有效的还原目标详情", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            val app = AIAgentApplication.instance
+            val intentSenderRequest = app.trashExecutor.prepareRestoreRequest(targets)
+            if (intentSenderRequest != null) {
+                pendingRestoreRecord = record
+                restoreConsentLauncher.launch(intentSenderRequest)
+            } else {
+                Toast.makeText(this@MainActivity, "当前系统不支持或未找到待还原文件", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra("prompt")?.let { prompt ->
+            if (prompt.isNotBlank()) {
+                currentTab = AppTab.ASSISTANT
+                handleUserPrompt(prompt)
+            }
+        }
     }
 }

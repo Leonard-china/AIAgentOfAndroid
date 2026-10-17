@@ -33,7 +33,8 @@ class LlmClient(
 
     data class LlmResponse(
         val content: String?,
-        val toolCalls: List<ToolCall> = emptyList()
+        val toolCalls: List<ToolCall> = emptyList(),
+        val rawMessage: JsonObject? = null
     )
 
     suspend fun testConnection(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -128,7 +129,7 @@ class LlmClient(
                 }
             }
 
-            LlmResponse(content = content, toolCalls = toolCalls)
+            LlmResponse(content = content, toolCalls = toolCalls, rawMessage = message)
         }
     }
 }

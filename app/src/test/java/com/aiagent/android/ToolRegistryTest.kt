@@ -11,7 +11,7 @@ class ToolRegistryTest {
     @Test
     fun testToolRegistryDeclaresAllCoreTools() {
         val tools = ToolRegistry.getToolsSchema()
-        assertEquals(7, tools.size())
+        assertEquals(8, tools.size())
 
         val toolNames = mutableSetOf<String>()
         for (elem in tools) {
@@ -22,6 +22,7 @@ class ToolRegistryTest {
         assertTrue(toolNames.contains("query_storage_stats"))
         assertTrue(toolNames.contains("query_large_files"))
         assertTrue(toolNames.contains("find_duplicate_files"))
+        assertTrue(toolNames.contains("find_similar_photos"))
         assertTrue(toolNames.contains("query_screenshots"))
         assertTrue(toolNames.contains("query_apk_files"))
         assertTrue(toolNames.contains("propose_trash_plan"))

@@ -16,6 +16,7 @@ import com.aiagent.android.model.formatBytes
 import com.aiagent.android.security.KeyStoreVault
 import com.aiagent.android.tools.DuplicateDetectionEngine
 import com.aiagent.android.tools.MediaScannerEngine
+import com.aiagent.android.tools.SimilarPhotoEngine
 import com.aiagent.android.tools.StorageEngine
 import com.google.gson.Gson
 import com.google.gson.JsonArray
@@ -28,6 +29,7 @@ class AgentOrchestrator(
     private val storageEngine: StorageEngine,
     private val mediaScanner: MediaScannerEngine,
     private val duplicateEngine: DuplicateDetectionEngine,
+    private val similarPhotoEngine: SimilarPhotoEngine,
     private val vault: KeyStoreVault
 ) {
     private val gson = Gson()
@@ -35,6 +37,7 @@ class AgentOrchestrator(
 
     suspend fun processGoal(
         userPrompt: String,
+        history: List<AiMessage> = emptyList(),
         onStepUpdated: (List<TaskStep>) -> Unit
     ): AiMessage = withContext(Dispatchers.IO) {
         val steps = mutableListOf<TaskStep>()
@@ -61,9 +64,10 @@ class AgentOrchestrator(
             你是一个专业、严谨且诚实的 Android 手机智能文件与相册管理助手。
             【核心铁律】
             1. 你必须调用工具获取真实数据，严禁编造任何虚假路径、假文件或假清理数据！
-            2. 所有清理/删除/移入回收站操作，必须调用 propose_trash_plan 工具生成操作预览卡片，由用户在界面显式确认！
-            3. 只能操作你此前通过工具查询到的真实有效本地文件 ID。
-            4. 请用温和、清晰、易懂的中文与用户沟通，突出真实收益（如预计释放体积）。
+            2. 当用户表达清理、移入回收站、删除或对之前查询列出的冗余文件表示确认时（例如“确认清理”、“移入回收站”、“把刚刚找到的冗余副本移入回收站”），你必须调用 propose_trash_plan 工具并传入目标文件 ID 列表生成操作预览卡片！绝对不要只用文字敷衍回复，必须生成操作卡片供用户在界面上核验并确认。
+            3. 只能操作真实有效的本地文件 ID（可来自此前查询工具返回的 items 或 duplicate_groups 中的 redundant_copies ID）。
+            4. 相似照片（find_similar_photos）仅为视觉候选，非完全重复，切勿在未让用户人工挑选前盲目建议删除。
+            5. 请用温和、清晰、易懂的中文与用户沟通，突出真实收益（如预计释放空间）。
         """.trimIndent()
 
         val messages = JsonArray().apply {
@@ -71,6 +75,21 @@ class AgentOrchestrator(
                 addProperty("role", "system")
                 addProperty("content", systemPrompt)
             })
+            // Pass recent multi-turn conversation history
+            val recentHistory = history.takeLast(6)
+            for (msg in recentHistory) {
+                if (msg.sender == "USER" && msg.content.isNotBlank()) {
+                    add(JsonObject().apply {
+                        addProperty("role", "user")
+                        addProperty("content", msg.content)
+                    })
+                } else if (msg.sender == "ASSISTANT" && msg.content.isNotBlank()) {
+                    add(JsonObject().apply {
+                        addProperty("role", "assistant")
+                        addProperty("content", msg.content)
+                    })
+                }
+            }
             add(JsonObject().apply {
                 addProperty("role", "user")
                 addProperty("content", userPrompt)
@@ -78,16 +97,30 @@ class AgentOrchestrator(
         }
 
         try {
-            val response = client.chatWithTools(messages, ToolRegistry.getToolsSchema())
-            steps[0].status = "COMPLETED"
-            steps[0].detail = "意图理解完成"
-            onStepUpdated(steps.toList())
-
             var finalPlan: ActionPlan? = null
-            val toolResults = mutableListOf<String>()
+            var finalReplyContent: String? = null
+            val maxTurns = 4
+            var currentTurn = 0
 
-            if (response.toolCalls.isNotEmpty()) {
-                for ((index, tc) in response.toolCalls.withIndex()) {
+            while (currentTurn < maxTurns) {
+                currentTurn++
+                val response = client.chatWithTools(messages, ToolRegistry.getToolsSchema())
+
+                if (currentTurn == 1) {
+                    steps[0].status = "COMPLETED"
+                    steps[0].detail = "意图理解完成"
+                    onStepUpdated(steps.toList())
+                }
+
+                if (response.toolCalls.isEmpty()) {
+                    finalReplyContent = response.content
+                    break
+                }
+
+                // Append assistant message with tool calls
+                response.rawMessage?.let { messages.add(it) }
+
+                for (tc in response.toolCalls) {
                     val stepIdx = steps.size + 1
                     val step = TaskStep(stepIdx, "执行工具: ${tc.functionName}", "RUNNING", "正在调用系统接口获取真实数据...")
                     steps.add(step)
@@ -96,23 +129,30 @@ class AgentOrchestrator(
                     val result = executeToolCall(tc.functionName, tc.argumentsJson) { plan ->
                         finalPlan = plan
                     }
-                    toolResults.add(result)
 
                     step.status = "COMPLETED"
-                    step.detail = result.take(100)
+                    step.detail = result.take(120)
                     onStepUpdated(steps.toList())
+
+                    // Append tool response
+                    val toolMsg = JsonObject().apply {
+                        addProperty("role", "tool")
+                        addProperty("tool_call_id", tc.id)
+                        addProperty("content", result)
+                    }
+                    messages.add(toolMsg)
                 }
             }
 
-            val finalReplyContent = response.content ?: if (toolResults.isNotEmpty()) {
-                toolResults.joinToString("\n\n")
+            val reply = finalReplyContent ?: if (finalPlan != null) {
+                "已为您制定操作计划并生成确认卡片，请在下方卡片中核对目标文件并确认是否移入回收站。"
             } else {
                 "已为您完成任务分析。"
             }
 
             AiMessage(
                 sender = "ASSISTANT",
-                content = finalReplyContent,
+                content = reply,
                 plan = finalPlan,
                 taskSteps = steps
             )
@@ -312,6 +352,46 @@ class AgentOrchestrator(
                 }
             }
 
+            lower.contains("相似") || lower.contains("连拍") -> {
+                steps.add(TaskStep(1, "扫描相册候选照片", "RUNNING", "正在读取相册照片..."))
+                onStepUpdated(steps.toList())
+
+                val media = mediaScanner.queryMediaItems(limit = 600)
+                media.forEach { knownItems[it.id] = it }
+
+                steps[0].status = "COMPLETED"
+                steps[0].detail = "已扫描 ${media.size} 张照片"
+                steps.add(TaskStep(2, "计算感知哈希与时间戳聚类", "RUNNING", "正在进行轻量感知相似比对..."))
+                onStepUpdated(steps.toList())
+
+                val similarGroups = similarPhotoEngine.findSimilarCandidates(media)
+                steps[1].status = "COMPLETED"
+                steps[1].detail = "比对完成，发现 ${similarGroups.size} 组疑似相似照片"
+                onStepUpdated(steps.toList())
+
+                if (similarGroups.isEmpty()) {
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "📷 未在相册中发现明显的相似或连拍照片，相册很清爽！",
+                        taskSteps = steps
+                    )
+                } else {
+                    val reply = buildString {
+                        appendLine("📸 共发现 **${similarGroups.size}** 组视觉相似或连拍照片：\n")
+                        similarGroups.take(5).forEachIndexed { i, g ->
+                            appendLine("**分组 ${i + 1}**（相似度：${String.format(java.util.Locale.US, "%.0f%%", g.similarityScore * 100)}，共 ${g.items.size} 张）：")
+                            g.items.forEach { appendLine("  • ${it.displayName} (${it.formatSize()})") }
+                            appendLine()
+                        }
+                        if (similarGroups.size > 5) {
+                            appendLine("...及另外 ${similarGroups.size - 5} 组相似照片。")
+                        }
+                        appendLine("💡 提示：相似照片可能包含不同表情或瞬间，建议在「相册与文件」中人工预览挑选保留。")
+                    }
+                    AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
+                }
+            }
+
             lower.contains("系统存储") || lower.contains("设置") || lower.contains("清理页面") -> {
                 steps.add(TaskStep(1, "打开系统存储设置页面", "RUNNING", "正在调起系统存储 Intent..."))
                 onStepUpdated(steps.toList())
@@ -336,6 +416,7 @@ class AgentOrchestrator(
                         • **“看看手机里什么最占空间”**：分析磁盘与各类别物理占用
                         • **“找出超过 500MB 的视频”**：筛选超大媒体文件
                         • **“排查重复照片”**：计算 SHA-256 精准识别完全重复副本并提供保留建议
+                        • **“排查相似照片”**：轻量感知哈希分析连拍与相似照片
                         • **“查看截图文件”**：快速统计相册截屏
                         • **“找出旧安装包”**：清理残留的 APK 安装文件
                         • **“打开系统存储页面”**：辅助导航至系统存储管理
@@ -355,30 +436,137 @@ class AgentOrchestrator(
         when (name) {
             "query_storage_stats" -> {
                 val stats = storageEngine.getStorageOverview()
-                "存储概览: 总量 ${formatBytes(stats.totalBytes)}, 已用 ${formatBytes(stats.usedBytes)} (${String.format("%.1f", stats.usedPercent)}%), 可用 ${formatBytes(stats.availableBytes)}。" +
-                        "其中视频: ${formatBytes(stats.videosBytes)}, 图片: ${formatBytes(stats.imagesBytes)}, 文档: ${formatBytes(stats.documentsBytes)}, APK: ${formatBytes(stats.apksBytes)}。"
+                val summary = JsonObject().apply {
+                    addProperty("total_bytes", stats.totalBytes)
+                    addProperty("total_formatted", formatBytes(stats.totalBytes))
+                    addProperty("used_bytes", stats.usedBytes)
+                    addProperty("used_formatted", formatBytes(stats.usedBytes))
+                    addProperty("used_percent", String.format(java.util.Locale.US, "%.1f", stats.usedPercent))
+                    addProperty("available_bytes", stats.availableBytes)
+                    addProperty("available_formatted", formatBytes(stats.availableBytes))
+                    addProperty("videos_formatted", formatBytes(stats.videosBytes))
+                    addProperty("images_formatted", formatBytes(stats.imagesBytes))
+                    addProperty("audio_formatted", formatBytes(stats.audioBytes))
+                    addProperty("documents_formatted", formatBytes(stats.documentsBytes))
+                    addProperty("apks_formatted", formatBytes(stats.apksBytes))
+                    addProperty("system_and_others_formatted", formatBytes(stats.othersBytes))
+                }
+                summary.toString()
             }
             "query_large_files" -> {
                 val minSizeMb = if (args.has("min_size_mb")) args.get("min_size_mb").asLong else 500L
                 val items = mediaScanner.queryLargeVideos(minSizeMb * 1024L * 1024L)
                 items.forEach { knownItems[it.id] = it }
-                "找到 ${items.size} 个超过 ${minSizeMb}MB 的大文件，合计 ${formatBytes(items.sumOf { it.sizeBytes })}。"
+                val summary = JsonObject().apply {
+                    addProperty("count", items.size)
+                    addProperty("total_bytes", items.sumOf { it.sizeBytes })
+                    addProperty("total_formatted", formatBytes(items.sumOf { it.sizeBytes }))
+                    val list = JsonArray()
+                    items.take(20).forEach {
+                        list.add(JsonObject().apply {
+                            addProperty("id", it.id)
+                            addProperty("displayName", it.displayName)
+                            addProperty("sizeBytes", it.sizeBytes)
+                            addProperty("sizeFormatted", it.formatSize())
+                        })
+                    }
+                    add("items", list)
+                }
+                summary.toString()
             }
             "find_duplicate_files" -> {
                 val items = mediaScanner.queryMediaItems(limit = 1000)
                 items.forEach { knownItems[it.id] = it }
                 val dupes = duplicateEngine.findDuplicates(items)
-                "排查完成，发现 ${dupes.size} 组完全重复文件，可节省空间 ${formatBytes(dupes.sumOf { it.wastedBytes })}。"
+                val summary = JsonObject().apply {
+                    addProperty("group_count", dupes.size)
+                    addProperty("total_wasted_bytes", dupes.sumOf { it.wastedBytes })
+                    addProperty("total_wasted_formatted", formatBytes(dupes.sumOf { it.wastedBytes }))
+                    val groups = JsonArray()
+                    dupes.take(15).forEach { g ->
+                        groups.add(JsonObject().apply {
+                            addProperty("size_formatted", formatBytes(g.fileSize))
+                            val keep = g.items.firstOrNull()
+                            if (keep != null) {
+                                add("keep_original", JsonObject().apply {
+                                    addProperty("id", keep.id)
+                                    addProperty("displayName", keep.displayName)
+                                })
+                            }
+                            val copies = JsonArray()
+                            g.items.drop(1).forEach { cp ->
+                                copies.add(JsonObject().apply {
+                                    addProperty("id", cp.id)
+                                    addProperty("displayName", cp.displayName)
+                                })
+                            }
+                            add("redundant_copies", copies)
+                        })
+                    }
+                    add("duplicate_groups", groups)
+                }
+                summary.toString()
+            }
+            "find_similar_photos" -> {
+                val items = mediaScanner.queryMediaItems(limit = 600)
+                items.forEach { knownItems[it.id] = it }
+                val groups = similarPhotoEngine.findSimilarCandidates(items)
+                val summary = JsonObject().apply {
+                    addProperty("candidate_group_count", groups.size)
+                    val jsonGroups = JsonArray()
+                    groups.take(10).forEach { g ->
+                        jsonGroups.add(JsonObject().apply {
+                            addProperty("similarity_score", String.format(java.util.Locale.US, "%.2f", g.similarityScore))
+                            val itemsArr = JsonArray()
+                            g.items.forEach { itm ->
+                                itemsArr.add(JsonObject().apply {
+                                    addProperty("id", itm.id)
+                                    addProperty("displayName", itm.displayName)
+                                    addProperty("sizeFormatted", itm.formatSize())
+                                })
+                            }
+                            add("photos", itemsArr)
+                        })
+                    }
+                    add("groups", jsonGroups)
+                }
+                summary.toString()
             }
             "query_screenshots" -> {
                 val items = mediaScanner.queryScreenshots()
                 items.forEach { knownItems[it.id] = it }
-                "找到 ${items.size} 张截屏，共 ${formatBytes(items.sumOf { it.sizeBytes })}。"
+                val summary = JsonObject().apply {
+                    addProperty("count", items.size)
+                    addProperty("total_formatted", formatBytes(items.sumOf { it.sizeBytes }))
+                    val list = JsonArray()
+                    items.take(20).forEach {
+                        list.add(JsonObject().apply {
+                            addProperty("id", it.id)
+                            addProperty("displayName", it.displayName)
+                            addProperty("sizeFormatted", it.formatSize())
+                        })
+                    }
+                    add("items", list)
+                }
+                summary.toString()
             }
             "query_apk_files" -> {
                 val items = mediaScanner.queryApks()
                 items.forEach { knownItems[it.id] = it }
-                "找到 ${items.size} 个 APK 安装包，共 ${formatBytes(items.sumOf { it.sizeBytes })}。"
+                val summary = JsonObject().apply {
+                    addProperty("count", items.size)
+                    addProperty("total_formatted", formatBytes(items.sumOf { it.sizeBytes }))
+                    val list = JsonArray()
+                    items.take(20).forEach {
+                        list.add(JsonObject().apply {
+                            addProperty("id", it.id)
+                            addProperty("displayName", it.displayName)
+                            addProperty("sizeFormatted", it.formatSize())
+                        })
+                    }
+                    add("items", list)
+                }
+                summary.toString()
             }
             "propose_trash_plan" -> {
                 val idsArray = if (args.has("target_ids")) args.getAsJsonArray("target_ids") else JsonArray()
@@ -387,8 +575,9 @@ class AgentOrchestrator(
                 val targetList = mutableListOf<ActionTarget>()
                 for (idElem in idsArray) {
                     val id = idElem.asLong
-                    val item = knownItems[id]
+                    val item = knownItems[id] ?: mediaScanner.queryItemById(id)
                     if (item != null) {
+                        knownItems[item.id] = item
                         targetList.add(
                             ActionTarget(
                                 id = item.id,
@@ -414,7 +603,7 @@ class AgentOrchestrator(
                         status = PlanStatus.PREVIEW
                     )
                     onPlanCreated(plan)
-                    "已生成操作预览卡片，包含 ${targetList.size} 个文件，预计可释放 ${formatBytes(totalBytes)}。已暂停执行，等待用户在界面确认！"
+                    "已生成操作预览卡片，包含 ${targetList.size} 个文件，预计可释放 ${formatBytes(totalBytes)}。已安全暂停执行，等待用户在界面确认！"
                 }
             }
             "open_storage_settings" -> {

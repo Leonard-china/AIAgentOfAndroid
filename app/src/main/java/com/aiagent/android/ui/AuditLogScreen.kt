@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +30,7 @@ import java.util.TimeZone
 fun AuditLogScreen(
     auditRecords: List<AuditRecord>,
     onRefresh: () -> Unit,
+    onRestoreRecord: (AuditRecord) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -80,7 +82,7 @@ fun AuditLogScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(auditRecords, key = { it.id }) { record ->
-                    AuditRecordCard(record = record)
+                    AuditRecordCard(record = record, onRestoreRecord = onRestoreRecord)
                 }
             }
         }
@@ -88,7 +90,10 @@ fun AuditLogScreen(
 }
 
 @Composable
-fun AuditRecordCard(record: AuditRecord) {
+fun AuditRecordCard(
+    record: AuditRecord,
+    onRestoreRecord: (AuditRecord) -> Unit = {}
+) {
     var expanded by remember { mutableStateOf(false) }
 
     val sdf = remember {
@@ -209,6 +214,24 @@ fun AuditRecordCard(record: AuditRecord) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(8.dp)
                     )
+                }
+            }
+
+            if (record.status == "SUCCESS_TRASHED") {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = { onRestoreRecord(record) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("从系统回收站还原", fontSize = 12.sp)
+                    }
                 }
             }
         }

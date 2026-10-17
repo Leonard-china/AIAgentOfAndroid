@@ -138,7 +138,13 @@ class MediaScannerEngine(private val context: Context) {
                         continue
                     }
 
-                    val contentUri = ContentUris.withAppendedId(uri, id)
+                    val specificTableUri = when (itemType) {
+                        MediaType.IMAGE -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                        MediaType.VIDEO -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                        MediaType.AUDIO -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                        else -> MediaStore.Files.getContentUri("external")
+                    }
+                    val contentUri = ContentUris.withAppendedId(specificTableUri, id)
 
                     results.add(
                         MediaItem(
@@ -173,6 +179,67 @@ class MediaScannerEngine(private val context: Context) {
 
     suspend fun queryApks(): List<MediaItem> {
         return queryMediaItems(type = MediaType.APK, limit = 100)
+    }
+
+    suspend fun queryItemById(id: Long): MediaItem? = withContext(Dispatchers.IO) {
+        val uri = MediaStore.Files.getContentUri("external")
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DATA,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.BUCKET_DISPLAY_NAME
+        )
+        val selection = "${MediaStore.MediaColumns._ID} = ?"
+        val selectionArgs = arrayOf(id.toString())
+
+        try {
+            context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                    val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+                    val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+
+                    val itemId = cursor.getLong(idCol)
+                    val name = cursor.getString(nameCol) ?: "未知文件"
+                    val path = cursor.getString(dataCol) ?: ""
+                    val size = cursor.getLong(sizeCol)
+                    val date = cursor.getLong(dateCol)
+                    val mime = cursor.getString(mimeCol) ?: ""
+                    val bucket = cursor.getString(bucketCol) ?: ""
+
+                    val itemType = resolveMediaType(mime, path)
+                    val contentUri = when (itemType) {
+                        MediaType.IMAGE -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, itemId)
+                        MediaType.VIDEO -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, itemId)
+                        MediaType.AUDIO -> ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, itemId)
+                        else -> ContentUris.withAppendedId(MediaStore.Files.getContentUri("external"), itemId)
+                    }
+
+                    return@withContext MediaItem(
+                        id = itemId,
+                        uriString = contentUri.toString(),
+                        displayName = name,
+                        path = path,
+                        sizeBytes = size,
+                        dateModified = date * 1000L,
+                        mimeType = mime,
+                        mediaType = itemType,
+                        isScreenshot = bucket.equals("Screenshots", ignoreCase = true) || name.contains("Screenshot", ignoreCase = true),
+                        bucketName = bucket
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        null
     }
 
     private fun resolveMediaType(mimeType: String, path: String): MediaType {

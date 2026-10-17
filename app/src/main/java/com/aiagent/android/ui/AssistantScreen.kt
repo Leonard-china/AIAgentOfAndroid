@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,6 +48,15 @@ fun AssistantScreen(
         "打开系统存储管理页面"
     )
 
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size, activeSteps.size) {
+        val totalCount = messages.size + if (isProcessing && activeSteps.isNotEmpty()) 1 else 0
+        if (totalCount > 0) {
+            listState.animateScrollToItem(totalCount - 1)
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -54,6 +64,7 @@ fun AssistantScreen(
     ) {
         // Message & Action Stream
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()

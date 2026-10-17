@@ -38,9 +38,9 @@ class AIAgentApplication : Application() {
         storageEngine = StorageEngine(this)
         mediaScanner = MediaScannerEngine(this)
         duplicateEngine = DuplicateDetectionEngine(this, dbHelper)
-        similarPhotoEngine = SimilarPhotoEngine()
+        similarPhotoEngine = SimilarPhotoEngine(this)
         trashExecutor = TrashOperationExecutor(this, dbHelper)
-        orchestrator = AgentOrchestrator(this, storageEngine, mediaScanner, duplicateEngine, vault)
+        orchestrator = AgentOrchestrator(this, storageEngine, mediaScanner, duplicateEngine, similarPhotoEngine, vault)
     }
 
     companion object {

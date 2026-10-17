@@ -106,6 +106,16 @@ object ToolRegistry {
             }
         ))
 
+        // 8. find_similar_photos
+        tools.add(createToolFunction(
+            name = "find_similar_photos",
+            description = "排查相册中视觉相似或连拍的照片候选分组（基于轻量感知哈希与时间戳聚类，不直接删除，仅供用户挑选保留）",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject())
+            }
+        ))
+
         return tools
     }
 
