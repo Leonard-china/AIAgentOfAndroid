@@ -11,7 +11,7 @@ class ToolRegistryTest {
     @Test
     fun testToolRegistryDeclaresAllCoreTools() {
         val tools = ToolRegistry.getToolsSchema()
-        assertEquals(8, tools.size())
+        assertEquals(14, tools.size())
 
         val toolNames = mutableSetOf<String>()
         for (elem in tools) {
@@ -27,6 +27,12 @@ class ToolRegistryTest {
         assertTrue(toolNames.contains("query_apk_files"))
         assertTrue(toolNames.contains("propose_trash_plan"))
         assertTrue(toolNames.contains("open_storage_settings"))
+        assertTrue(toolNames.contains("operate_screen_click"))
+        assertTrue(toolNames.contains("operate_screen_swipe"))
+        assertTrue(toolNames.contains("operate_screen_global_action"))
+        assertTrue(toolNames.contains("inspect_current_screen"))
+        assertTrue(toolNames.contains("open_accessibility_settings"))
+        assertTrue(toolNames.contains("query_file_detail"))
     }
 
     @Test

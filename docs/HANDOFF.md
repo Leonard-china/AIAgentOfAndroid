@@ -27,11 +27,21 @@
   - `TrashOperationExecutor`：基于 `MediaStore.createTrashRequest` 的安全回收站提交流程，支持反向还原（`restoreConsentLauncher`）与 SQLite 审计跟踪。
 - [x] **现代化 Jetpack Compose UI 与交互**：
   - 5 大核心界面就绪（助手、存储、相册与文件、操作记录、设置）；
-  - `AssistantScreen` 支持新消息自动滚屏（`rememberLazyListState` + `LaunchedEffect`）；
-  - 支持多轮对话历史上下文保持（`AgentOrchestrator` 会话上下文）。
+- [x] **受控屏幕操作与连点器辅助能力 (Accessibility & Gesture)**：
+  - `ScreenAssistantAccessibilityService` 升级：实现基于 `dispatchGesture` 的高精度屏幕单点模拟点击 (`clickAt(x, y)`) 与平滑方向滑动 (`swipeDirection`)；
+  - 文字控件智能点击：优先调用系统无障碍节点 Action，若节点未声明 clickable 则自动回退到节点屏幕物理中心坐标模拟手势点击；
+  - 全局系统按键：支持返回 (`BACK`)、回到桌面 (`HOME`)、多任务 (`RECENTS`)、通知栏 (`NOTIFICATIONS`)；
+  - 纯文本屏幕提取：`inspect_current_screen` 输出当前屏幕可见文字与中心坐标，极省 Token，零视觉模型开销；
+  - 双模无缝支持：在线 LLM 工具调用（14 大工具声明）与离线规则规划引擎均完整支持屏幕操作；
+  - 荣耀 VKJ-AN00 (MagicOS 10.0 / Android 16) 无障碍服务已激活并成功部署最新 APK。
+- [x] **相册防 Token 爆炸与隐私离线保护 (Token Economy & Privacy)**：
+  - System Prompt 确立铁律：严禁逐张翻看相册或向大模型回传原始图片二进制/Base64；
+  - 纯本地引擎处理：相册扫描、SHA-256 分块查重、dHash 相似度聚类全部在设备端离线运行；
+  - 极精简工具返回协议：大文件、重复分组、相似照片、截图及 APK 列表回传数量合理封顶（仅返回前 4~8 项关键摘要），剔除臃肿字段；
+  - 新增 `query_file_detail` 单文件按需查询工具，仅在用户指明要查看某具体文件时调取，彻底根除 Token 爆炸风险。
 - [x] **单元测试与打包**：
-  - `.\gradlew testDebugUnitTest` 全量通过；
-  - `.\gradlew assembleDebug` 全量通过。
+  - `.\gradlew.bat testDebugUnitTest` 14 项工具 Schema 与逻辑单元测试全量通过；
+  - `.\gradlew.bat assembleDebug` 全量通过并成功静默覆盖安装到真机。
 
 ### 2.2 已实现但未验证 (Implemented but Unverified)
 - [ ] **全量相册感知哈希大图集压力测试**：

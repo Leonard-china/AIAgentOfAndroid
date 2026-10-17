@@ -116,6 +116,110 @@ object ToolRegistry {
             }
         ))
 
+        // 9. operate_screen_click
+        tools.add(createToolFunction(
+            name = "operate_screen_click",
+            description = "模拟屏幕点击操作（支持连点器手势模式与文字按钮匹配）：可通过文字匹配点击，或直接指定屏幕坐标 (x, y) 模拟手势点击",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val textProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "要点击的屏幕文字或按钮名称（例如：'设置'、'存储空间'、'确认'）")
+                    }
+                    val xProp = JsonObject().apply {
+                        addProperty("type", "number")
+                        addProperty("description", "点击的屏幕横坐标 X（像素），用于连点器坐标点击")
+                    }
+                    val yProp = JsonObject().apply {
+                        addProperty("type", "number")
+                        addProperty("description", "点击的屏幕纵坐标 Y（像素），用于连点器坐标点击")
+                    }
+                    add("text", textProp)
+                    add("x", xProp)
+                    add("y", yProp)
+                }
+                add("properties", props)
+            }
+        ))
+
+        // 10. operate_screen_swipe
+        tools.add(createToolFunction(
+            name = "operate_screen_swipe",
+            description = "模拟屏幕手势滑动操作（用于浏览长列表、上下翻页或左右切换）",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val dirProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "滑动方向：UP(向上滑/浏览下方内容), DOWN(向下滑/浏览上方内容), LEFT(向左滑), RIGHT(向右滑)")
+                    }
+                    add("direction", dirProp)
+                }
+                add("properties", props)
+                val required = JsonArray().apply { add("direction") }
+                add("required", required)
+            }
+        ))
+
+        // 11. operate_screen_global_action
+        tools.add(createToolFunction(
+            name = "operate_screen_global_action",
+            description = "执行系统全局按键动作：返回（BACK）、回到桌面（HOME）、多任务列表（RECENTS）、通知中心（NOTIFICATIONS）",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val actProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "全局动作名称：BACK, HOME, RECENTS, NOTIFICATIONS")
+                    }
+                    add("action", actProp)
+                }
+                add("properties", props)
+                val required = JsonArray().apply { add("action") }
+                add("required", required)
+            }
+        ))
+
+        // 12. inspect_current_screen
+        tools.add(createToolFunction(
+            name = "inspect_current_screen",
+            description = "【极度省 Token 纯文本】获取当前屏幕上可见的文本、按钮及坐标摘要，不耗费视觉 Token。在需要点击前可先查看屏幕上有哪些元素",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject())
+            }
+        ))
+
+        // 13. open_accessibility_settings
+        tools.add(createToolFunction(
+            name = "open_accessibility_settings",
+            description = "调起系统无障碍设置页面，指引用户开启辅助操作服务",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject())
+            }
+        ))
+
+        // 14. query_file_detail
+        tools.add(createToolFunction(
+            name = "query_file_detail",
+            description = "【极度省 Token】仅在用户明确需要查看某一个具体文件的详细信息时调用，严格限制单文件查询，严禁用于遍历相册",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val idProp = JsonObject().apply {
+                        addProperty("type", "integer")
+                        addProperty("description", "目标文件的本地唯一 ID")
+                    }
+                    add("file_id", idProp)
+                }
+                add("properties", props)
+                val required = JsonArray().apply { add("file_id") }
+                add("required", required)
+            }
+        ))
+
         return tools
     }
 

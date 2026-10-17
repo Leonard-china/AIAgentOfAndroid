@@ -13,6 +13,7 @@ import com.aiagent.android.model.MediaType
 import com.aiagent.android.model.PlanStatus
 import com.aiagent.android.model.TaskStep
 import com.aiagent.android.model.formatBytes
+import com.aiagent.android.screen.ScreenAssistantAccessibilityService
 import com.aiagent.android.security.KeyStoreVault
 import com.aiagent.android.tools.DuplicateDetectionEngine
 import com.aiagent.android.tools.MediaScannerEngine
@@ -62,12 +63,28 @@ class AgentOrchestrator(
 
         val systemPrompt = """
             你是一个专业、严谨且诚实的 Android 手机智能文件与相册管理助手。
+
             【核心铁律】
             1. 你必须调用工具获取真实数据，严禁编造任何虚假路径、假文件或假清理数据！
             2. 当用户表达清理、移入回收站、删除或对之前查询列出的冗余文件表示确认时（例如“确认清理”、“移入回收站”、“把刚刚找到的冗余副本移入回收站”），你必须调用 propose_trash_plan 工具并传入目标文件 ID 列表生成操作预览卡片！绝对不要只用文字敷衍回复，必须生成操作卡片供用户在界面上核验并确认。
             3. 只能操作真实有效的本地文件 ID（可来自此前查询工具返回的 items 或 duplicate_groups 中的 redundant_copies ID）。
             4. 相似照片（find_similar_photos）仅为视觉候选，非完全重复，切勿在未让用户人工挑选前盲目建议删除。
             5. 请用温和、清晰、易懂的中文与用户沟通，突出真实收益（如预计释放空间）。
+
+            【极度省 Token 与隐私保护铁律（极其重要）】
+            6. 绝对禁止逐张翻看相册或要求获取全部相册完整列表！
+            7. 绝对禁止传输任何图片原始二进制或 Base64 数据！所有相册索引、SHA-256 分块查重、dHash 相似度计算全部在手机端本地离线引擎静默完成，不消耗网络与额外 Token。
+            8. 本地工具返回给你的永远是高度精简的聚合统计数据（总大小、总数、精选前几项目录/ID）。只有在极少数必要情况下（用户明确要求查看某一个特定文件的具体信息时），才允许调用 query_file_detail 查询单文件详情，严禁全盘遍历！
+
+            【屏幕操作与连点器辅助能力】
+            9. 你拥有通过受控无障碍服务操作屏幕的能力（类似于手机连点器与手势模拟）！当用户要求你点击屏幕、操作界面、返回、滑动或导航时，【绝对不要】以“系统安全限制”、“我无法操作屏幕”为由拒绝！
+            10. 屏幕操作工具说明：
+                - 查找并点击界面文字或按钮：调用 operate_screen_click(text="文字")；
+                - 连点器坐标点击：调用 operate_screen_click(x=横坐标, y=纵坐标)；
+                - 滑动翻页：调用 operate_screen_swipe(direction="UP"|"DOWN"|"LEFT"|"RIGHT")；
+                - 返回或回桌面：调用 operate_screen_global_action(action="BACK"|"HOME")；
+                - 遇到不确定的界面时，可先调用 inspect_current_screen 获取屏幕可见文字摘要（纯文本解析，极省 Token，不消耗 Vision Token），再决定点击哪个按钮；
+                - 若提示无障碍服务尚未开启，可引导用户或调用 open_accessibility_settings 协助用户开启。
         """.trimIndent()
 
         val messages = JsonArray().apply {
@@ -408,6 +425,121 @@ class AgentOrchestrator(
                 )
             }
 
+            lower.contains("连点") || lower.contains("点击") || lower.contains("按一下") || lower.contains("点一下") || lower.contains("点按") -> {
+                steps.add(TaskStep(1, "执行屏幕辅助点击操作", "RUNNING", "正在检查无障碍辅助服务..."))
+                onStepUpdated(steps.toList())
+
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    steps[0].status = "FAILED"
+                    steps[0].detail = "无障碍辅助服务尚未开启"
+                    onStepUpdated(steps.toList())
+
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "⚠️ 手机无障碍辅助操作服务尚未开启。已为您打开系统设置页面，请找到并开启【Android AI 助手辅助服务】后即可使用连点器与屏幕点击功能。",
+                        taskSteps = steps
+                    )
+                } else {
+                    val keyword = extractClickKeyword(userPrompt)
+                    val clicked = if (keyword.isNotEmpty()) {
+                        ScreenAssistantAccessibilityService.findAndClick(keyword)
+                    } else {
+                        false
+                    }
+
+                    steps[0].status = if (clicked) "COMPLETED" else "FAILED"
+                    steps[0].detail = if (clicked) "成功点击: $keyword" else "未找到匹配控件"
+                    onStepUpdated(steps.toList())
+
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = if (clicked) "✅ 成功在屏幕上模拟点击「$keyword」。" else "未能找到屏幕上包含「$keyword」的可点击控件。您可以试着提供更精准的按钮文字或坐标。",
+                        taskSteps = steps
+                    )
+                }
+            }
+
+            lower.contains("滑动") || lower.contains("下滑") || lower.contains("上滑") || lower.contains("翻页") -> {
+                steps.add(TaskStep(1, "执行屏幕手势滑动", "RUNNING", "正在检查手势服务..."))
+                onStepUpdated(steps.toList())
+
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    steps[0].status = "FAILED"
+                    steps[0].detail = "无障碍辅助服务未开启"
+                    onStepUpdated(steps.toList())
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "⚠️ 手机无障碍辅助操作服务尚未开启。已为您调起系统设置页面。",
+                        taskSteps = steps
+                    )
+                } else {
+                    val dir = if (lower.contains("上滑") || lower.contains("向上")) "UP" else "DOWN"
+                    val success = ScreenAssistantAccessibilityService.swipeDirection(dir)
+                    steps[0].status = if (success) "COMPLETED" else "FAILED"
+                    steps[0].detail = "滑动方向: $dir"
+                    onStepUpdated(steps.toList())
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = if (success) "📱 屏幕已向 $dir 方向成功滑动。" else "屏幕滑动操作失败。",
+                        taskSteps = steps
+                    )
+                }
+            }
+
+            lower.contains("返回") || lower.contains("回桌面") || lower.contains("桌面") -> {
+                steps.add(TaskStep(1, "执行系统全局按键", "RUNNING", "正在发送全局指令..."))
+                onStepUpdated(steps.toList())
+
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    steps[0].status = "FAILED"
+                    steps[0].detail = "无障碍服务未开启"
+                    onStepUpdated(steps.toList())
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "⚠️ 手机无障碍辅助操作服务尚未开启。已调起系统设置页面。",
+                        taskSteps = steps
+                    )
+                } else {
+                    val action = if (lower.contains("桌面")) "HOME" else "BACK"
+                    val ok = ScreenAssistantAccessibilityService.performGlobal(action)
+                    steps[0].status = if (ok) "COMPLETED" else "FAILED"
+                    steps[0].detail = "执行动作: $action"
+                    onStepUpdated(steps.toList())
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = if (ok) "📱 已成功执行全局系统操作：$action。" else "执行全局按键失败。",
+                        taskSteps = steps
+                    )
+                }
+            }
+
+            lower.contains("屏幕有什么") || lower.contains("看屏幕") || lower.contains("查看屏幕") -> {
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "⚠️ 无障碍辅助服务尚未开启，无法分析屏幕。已为您打开系统设置页面。"
+                    )
+                } else {
+                    val summary = ScreenAssistantAccessibilityService.inspectScreenSummary()
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "🖥️ **当前屏幕可见元素摘要（本地无障碍提取，极省 Token）**：\n\n$summary"
+                    )
+                }
+            }
+
+            lower.contains("无障碍") || lower.contains("连点器") || lower.contains("辅助服务") -> {
+                openAccessibilitySettingsInternal()
+                AiMessage(
+                    sender = "ASSISTANT",
+                    content = "⚙️ 正在为您打开系统【无障碍设置】页面。请在列表中找到并开启【Android AI 助手辅助服务】，开启后即可支持屏幕模拟点击、手势滑动及自动导航！"
+                )
+            }
+
             else -> {
                 AiMessage(
                     sender = "ASSISTANT",
@@ -419,6 +551,7 @@ class AgentOrchestrator(
                         • **“排查相似照片”**：轻量感知哈希分析连拍与相似照片
                         • **“查看截图文件”**：快速统计相册截屏
                         • **“找出旧安装包”**：清理残留的 APK 安装文件
+                        • **“操作屏幕/连点器”**：点击界面文字、滑动翻页、模拟手势或查看屏幕元素
                         • **“打开系统存储页面”**：辅助导航至系统存储管理
                     """.trimIndent()
                 )
@@ -462,11 +595,10 @@ class AgentOrchestrator(
                     addProperty("total_bytes", items.sumOf { it.sizeBytes })
                     addProperty("total_formatted", formatBytes(items.sumOf { it.sizeBytes }))
                     val list = JsonArray()
-                    items.take(20).forEach {
+                    items.take(8).forEach {
                         list.add(JsonObject().apply {
                             addProperty("id", it.id)
                             addProperty("displayName", it.displayName)
-                            addProperty("sizeBytes", it.sizeBytes)
                             addProperty("sizeFormatted", it.formatSize())
                         })
                     }
@@ -483,7 +615,7 @@ class AgentOrchestrator(
                     addProperty("total_wasted_bytes", dupes.sumOf { it.wastedBytes })
                     addProperty("total_wasted_formatted", formatBytes(dupes.sumOf { it.wastedBytes }))
                     val groups = JsonArray()
-                    dupes.take(15).forEach { g ->
+                    dupes.take(6).forEach { g ->
                         groups.add(JsonObject().apply {
                             addProperty("size_formatted", formatBytes(g.fileSize))
                             val keep = g.items.firstOrNull()
@@ -514,7 +646,7 @@ class AgentOrchestrator(
                 val summary = JsonObject().apply {
                     addProperty("candidate_group_count", groups.size)
                     val jsonGroups = JsonArray()
-                    groups.take(10).forEach { g ->
+                    groups.take(4).forEach { g ->
                         jsonGroups.add(JsonObject().apply {
                             addProperty("similarity_score", String.format(java.util.Locale.US, "%.2f", g.similarityScore))
                             val itemsArr = JsonArray()
@@ -539,7 +671,7 @@ class AgentOrchestrator(
                     addProperty("count", items.size)
                     addProperty("total_formatted", formatBytes(items.sumOf { it.sizeBytes }))
                     val list = JsonArray()
-                    items.take(20).forEach {
+                    items.take(8).forEach {
                         list.add(JsonObject().apply {
                             addProperty("id", it.id)
                             addProperty("displayName", it.displayName)
@@ -557,7 +689,7 @@ class AgentOrchestrator(
                     addProperty("count", items.size)
                     addProperty("total_formatted", formatBytes(items.sumOf { it.sizeBytes }))
                     val list = JsonArray()
-                    items.take(20).forEach {
+                    items.take(8).forEach {
                         list.add(JsonObject().apply {
                             addProperty("id", it.id)
                             addProperty("displayName", it.displayName)
@@ -610,13 +742,133 @@ class AgentOrchestrator(
                 openStorageSettingsInternal()
                 "已启动 Intent 跳转系统存储设置页面。"
             }
+            "operate_screen_click" -> {
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    "屏幕操作未完成：手机无障碍辅助服务尚未开启。已为您打开系统无障碍设置页面，请找到并开启【Android AI 助手辅助服务】即可使用连点器及屏幕操作功能。"
+                } else {
+                    val text = if (args.has("text") && !args.get("text").isJsonNull) args.get("text").asString else null
+                    val x = if (args.has("x") && !args.get("x").isJsonNull) args.get("x").asFloat else null
+                    val y = if (args.has("y") && !args.get("y").isJsonNull) args.get("y").asFloat else null
+
+                    when {
+                        !text.isNullOrBlank() -> {
+                            val clicked = ScreenAssistantAccessibilityService.findAndClick(text)
+                            if (clicked) {
+                                "成功点击屏幕上包含文字「$text」的控件。"
+                            } else {
+                                "未在当前屏幕中找到包含文字「$text」的控件。您可以先调用 inspect_current_screen 查看当前屏幕元素或使用坐标模拟点击。"
+                            }
+                        }
+                        x != null && y != null -> {
+                            val clicked = ScreenAssistantAccessibilityService.clickAt(x, y)
+                            if (clicked) {
+                                "成功在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟点击（连点器手势模式）。"
+                            } else {
+                                "在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟手势点击失败。"
+                            }
+                        }
+                        else -> "参数错误：请提供要点击的文字 (text) 或坐标 (x, y)。"
+                    }
+                }
+            }
+            "operate_screen_swipe" -> {
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    "无障碍辅助服务尚未开启，已调起系统设置页面。"
+                } else {
+                    val dir = if (args.has("direction") && !args.get("direction").isJsonNull) args.get("direction").asString else "UP"
+                    val success = ScreenAssistantAccessibilityService.swipeDirection(dir)
+                    if (success) {
+                        "成功向 ${dir.uppercase()} 方向滑动屏幕。"
+                    } else {
+                        "屏幕滑动操作失败。"
+                    }
+                }
+            }
+            "operate_screen_global_action" -> {
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    "无障碍辅助服务尚未开启，已调起系统设置页面。"
+                } else {
+                    val action = if (args.has("action") && !args.get("action").isJsonNull) args.get("action").asString else "BACK"
+                    val success = ScreenAssistantAccessibilityService.performGlobal(action)
+                    if (success) {
+                        "成功执行系统全局动作: $action。"
+                    } else {
+                        "执行全局动作 $action 失败。"
+                    }
+                }
+            }
+            "inspect_current_screen" -> {
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    "无障碍辅助服务未开启，无法获取屏幕内容。已调起系统无障碍设置页面。"
+                } else {
+                    ScreenAssistantAccessibilityService.inspectScreenSummary()
+                }
+            }
+            "open_accessibility_settings" -> {
+                openAccessibilitySettingsInternal()
+                "已启动 Intent 打开系统无障碍设置页面，请开启【Android AI 助手辅助服务】。"
+            }
+            "query_file_detail" -> {
+                val fileId = if (args.has("file_id")) args.get("file_id").asLong else -1L
+                if (fileId <= 0L) {
+                    "参数错误：必须提供有效的 file_id。"
+                } else {
+                    val item = knownItems[fileId] ?: mediaScanner.queryItemById(fileId)
+                    if (item == null) {
+                        "未找到 ID 为 $fileId 的文件记录。"
+                    } else {
+                        knownItems[item.id] = item
+                        val obj = JsonObject().apply {
+                            addProperty("id", item.id)
+                            addProperty("displayName", item.displayName)
+                            addProperty("sizeFormatted", item.formatSize())
+                            addProperty("sizeBytes", item.sizeBytes)
+                            addProperty("mediaType", item.mediaType.name)
+                            addProperty("path", item.path)
+                            addProperty("bucketName", item.bucketName)
+                            addProperty("isScreenshot", item.isScreenshot)
+                        }
+                        obj.toString()
+                    }
+                }
+            }
             else -> "未知工具: $name"
         }
+    }
+
+    private fun extractClickKeyword(prompt: String): String {
+        val triggers = listOf("点击", "点一下", "按一下", "点按", "帮我点")
+        for (trig in triggers) {
+            val idx = prompt.indexOf(trig)
+            if (idx != -1) {
+                val rem = prompt.substring(idx + trig.length).trim().trim('“', '”', '"', '\'', '「', '」', ' ')
+                if (rem.isNotEmpty()) return rem
+            }
+        }
+        return prompt.trim()
     }
 
     private fun openStorageSettingsInternal() {
         try {
             val intent = Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            val fallback = Intent(Settings.ACTION_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(fallback)
+        }
+    }
+
+    private fun openAccessibilitySettingsInternal() {
+        try {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(intent)

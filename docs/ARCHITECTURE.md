@@ -76,10 +76,17 @@ graph TD
 3. **`StorageTool`**：
    - 通过 `StatFs` 获取系统及外部存储的真实总容量、可用容量与已用容量。
    - 聚合计算各类文件的真实物理占用（图片/视频/音频/文档/安装包/其他）。
-4. **`ScreenActionExecutor`**：
-   - 独立的 `AccessibilityService` 模块，默认关闭。
-   - 仅用于辅助导航（如自动帮用户拉起系统存储详情设置页），通过无障碍控件树遍历寻找关键词（如“存储”、“清理”）。
-   - 每次点击前核验目标节点存在性，绝不盲目按固定坐标连击。
+4. **`ScreenActionExecutor` (`ScreenAssistantAccessibilityService`)**：
+   - 独立的 `AccessibilityService` 模块，配置 `canPerformGestures="true"` 与 `canRetrieveWindowContent="true"`。
+   - 支持文字节点智能点击（优先调用节点 `ACTION_CLICK`，失败时自动下沉为其屏幕中心坐标执行连点手势）。
+   - 支持连点器手势模式：基于 `dispatchGesture` 模拟毫秒级单点点击 (`clickAt(x, y)`) 与平滑方向滑动 (`swipeDirection(direction)`)。
+   - 支持全局系统动作派发：返回 (`BACK`)、回到桌面 (`HOME`)、多任务列表 (`RECENTS`)、通知栏 (`NOTIFICATIONS`)。
+   - 提供轻量纯文本屏幕提取 (`inspect_current_screen`)：以纯文本形式提取可见可交互元素与中心坐标，杜绝截屏传输，极大节省 Token 开销。
+   - 安全铁律约束：坚决拦截针对系统级删除/清空/格式化等破坏性弹窗的自动代点。
+5. **Token 经济与隐私保护协议 (Token Economy & Privacy Protocol)**：
+   - 严禁向模型回传海量相册列表或原始图片 Base64/二进制数据。
+   - 全盘扫描、流式哈希与相似度聚合完全在端侧本地离线完成，回传大模型的数据严格保持轻量紧凑（数量封顶并剔除无用冗余字段）。
+   - 提供精准的单文件详细元数据查询工具 (`query_file_detail`)，仅在用户明确需要了解某一特定文件时单次按需调取。
 
 ### 2.4 数据访问与底层适配层 (Data & Adapters)
 1. **Room 本地持久化**：

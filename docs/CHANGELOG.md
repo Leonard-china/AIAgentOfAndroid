@@ -145,3 +145,48 @@
   - 已知问题：MagicOS 10.0 媒体删除/回收站需要用户手动在系统弹窗中点击一次“移至最近删除”（系统安全机制不可自动化代点，符合产品设计铁律）。
   - 后续事项：进一步丰富多选批量操作与相册内分类功能；持续调优端侧感知哈希在大图集下的后台多线程性能。
 
+---
+
+## [2026-10-18 07:20:00] - 落地 Token 爆炸根治防护体系与受控连点器屏幕操作模块
+
+- **变更摘要**：
+  - **相册防 Token 爆炸与隐私离线防护体系**：
+    - 在 `AgentOrchestrator` 的 System Prompt 中确立最高优先级铁律：严禁逐张翻看相册、严禁遍历相册所有文件、严禁向模型回传任何原始图片二进制或 Base64 编码；
+    - 确立本地离线引擎分流机制：媒体库全盘索引、SHA-256 分块查重、dHash 相似照片聚类等计算全部在端侧静默离线完成；
+    - 重构压缩工具层输出 Payload：对超大文件、重复分组、相似照片、截图及 APK 的返回列表进行数量封顶与体积压制（最多回传 4~8 条精选摘要），剔除无用字段；
+    - 新增单文件按需深度检索工具 `query_file_detail(file_id)`，仅在用户指明要查看某具体文件时按需调取，从机制上杜绝 Token 爆炸。
+  - **受控屏幕操作与连点器辅助模块全量落地**：
+    - 升级 `ScreenAssistantAccessibilityService`：
+      1. 实现基于 Android AccessibilityService `dispatchGesture` 的毫秒级精确坐标模拟点击（`clickAt(x, y)`），完整支持类似“连点器”的屏幕触控手势；
+      2. 实现方向性手势平滑滑动（`swipeDirection`，支持 UP/DOWN/LEFT/RIGHT 四向浏览翻页）；
+      3. 优化文字节点点击（`findAndClick`）：优先调用节点无障碍 `ACTION_CLICK`，若节点未声明 clickable 则自动回退到节点物理中心坐标模拟手势点击，大幅提升点击成功率；
+      4. 实现全局系统操作（`performGlobal`，支持 BACK、HOME、RECENTS、NOTIFICATIONS）；
+      5. 实现轻量纯文本屏幕提取（`inspect_current_screen`）：以纯文本格式输出当前屏幕可见元素及中心坐标，不消耗任何图片 Vision Token；
+      6. 严格保留安全底线：拦截针对系统级删除/清空/格式化破坏性弹窗的自动代点；
+    - 在 `ToolRegistry` 注册 6 大新增工具 Schema（工具总数扩充至 14 个）；
+    - 在 `AgentOrchestrator` 中打通在线 LLM 与离线规则规划引擎对屏幕操作的双模支持；消除模型之前以“系统安全限制”拒绝屏幕操作的问题。
+- **修改原因**：
+  - 响应用户对图库大批量查看造成 Token 爆炸的担忧，以及对屏幕操作/连点器能力的迫切诉求。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/screen/ScreenAssistantAccessibilityService.kt`
+  - `app/src/main/java/com/aiagent/android/ai/ToolRegistry.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/test/java/com/aiagent/android/ToolRegistryTest.kt`
+  - `docs/ARCHITECTURE.md`
+  - `docs/HANDOFF.md`
+  - `docs/CHANGELOG.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. APK 构建：`.\gradlew.bat assembleDebug`；
+    3. 目标真机（荣耀 VKJ-AN00 / MagicOS 10.0 / Android 16）静默部署：`adb push` 到 `/data/local/tmp/app.apk` 后执行 `pm install -r -t -g`；
+    4. 启动与无障碍服务状态检查：`adb shell dumpsys accessibility` 验证无障碍服务就绪，`uiautomator dump` 验证应用界面正常渲染。
+  - 真实结果：
+    1. 单元测试 14 项工具全部验证通过（`BUILD SUCCESSFUL in 32s`）；
+    2. Debug APK 编译成功（`BUILD SUCCESSFUL in 17s`），全静默覆盖安装真机成功（`Success`）；
+    3. 真机 `ScreenAssistantAccessibilityService` 服务保持激活状态，无崩溃异常。
+- **已知问题与后续事项**：
+  - 已知问题：部分第三方应用如果采用完全自定义 SurfaceView 或游戏引擎（如 Unity）渲染无无障碍节点，文字匹配模式可能检索不到节点，需使用连点器坐标点击模式 `operate_screen_click(x, y)` 触发。
+  - 后续事项：可在设置界面提供可视化连点器悬浮窗或坐标校准小工具，进一步增强普通用户的直观操作体验。
+
+
