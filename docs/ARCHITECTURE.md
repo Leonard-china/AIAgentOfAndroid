@@ -54,6 +54,12 @@ graph TD
   - 统一深色模式支持与现代中文字体排版。
   - 任务闭环状态呈现：区分【正在检索】、【生成方案】、【等待用户确认】、【执行中】、【校验结果】。
   - 所有耗时操作带有取消按钮与真实的百分比/文件计数进度条。
+- **桌面全局悬浮窗架构 (`FloatingAssistantService` & `FloatingAssistantManager`)**：
+  - 基于 Android `WindowManager`（`TYPE_APPLICATION_OVERLAY`）与 `SYSTEM_ALERT_WINDOW` 权限，支持跨任意第三方应用与手机桌面随时调出；
+  - 采用自定义 `FloatingLifecycleOwner`（集成 `LifecycleRegistry`、`ViewModelStore` 与 `SavedStateRegistryController`），让全功能 Jetpack Compose 可以在后台 Service 中稳定无缝运行；
+  - **双态自适应切换**：
+    1. **折叠态（悬浮球）**：采用 `FLAG_NOT_FOCUSABLE`，支持全屏边缘拖拽与吸附，不干扰下层应用触摸；点击立刻平滑展开；
+    2. **展开态（悬浮对话窗）**：采用 `FLAG_NOT_TOUCH_MODAL` 与 `SOFT_INPUT_ADJUST_RESIZE`，可呼出系统输入法键盘输入指令，支持快捷动作 Chips、实时任务步数卡片与操作确认预览卡片；点击悬浮窗外部区域（`ACTION_OUTSIDE`）自动缩回悬浮球。
 
 ### 2.2 任务编排与状态层 (Orchestration & State Management)
 - **核心组件**：

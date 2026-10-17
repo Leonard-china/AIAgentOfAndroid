@@ -220,6 +220,16 @@ object ToolRegistry {
             }
         ))
 
+        // 15. open_floating_window
+        tools.add(createToolFunction(
+            name = "open_floating_window",
+            description = "在用户要求时启动桌面悬浮窗助手，开启后在手机桌面与任意应用上层显示悬浮球，支持随时随地对话与操作屏幕",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject())
+            }
+        ))
+
         return tools
     }
 

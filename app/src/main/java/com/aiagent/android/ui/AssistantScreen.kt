@@ -40,6 +40,7 @@ fun AssistantScreen(
     var inputText by remember { mutableStateOf("") }
 
     val quickPrompts = listOf(
+        "打开桌面悬浮窗",
         "看看手机里什么最占空间",
         "找出超过 500MB 的视频",
         "排查重复照片",

@@ -29,6 +29,9 @@
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
+    <!-- Floating Window Overlay Permission (For global desktop assistant) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <application
         android:name=".AIAgentApplication"
         android:allowBackup="true"
@@ -63,6 +66,12 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Floating Assistant Window Service (Global desktop bubble & chat) -->
+        <service
+            android:name=".floating.FloatingAssistantService"
+            android:enabled="true"
+            android:exported="true" />
 
     </application>
 

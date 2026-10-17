@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aiagent.android.ai.LlmClient
+import com.aiagent.android.floating.FloatingAssistantManager
 import com.aiagent.android.screen.ScreenAssistantAccessibilityService
 import com.aiagent.android.security.KeyStoreVault
 import kotlinx.coroutines.launch
@@ -333,6 +334,73 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("前往系统无障碍设置开启服务")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Floating Window Assistant
+        item {
+            var isFloatingRunning by remember { mutableStateOf(FloatingAssistantManager.isServiceRunning()) }
+            val hasOverlay = FloatingAssistantManager.hasOverlayPermission(context)
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Layers, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "桌面悬浮窗助手", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                        text = "开启后在手机桌面与任意第三方应用界面上层显示智能悬浮球。轻点即可展开迷你对话窗，随时随地与 AI 对话、查看当前屏幕、模拟连点手势或清理手机。",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("桌面悬浮窗开关", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                text = when {
+                                    !hasOverlay -> "需授予「显示在其他应用上层」权限"
+                                    isFloatingRunning -> "悬浮窗运行中（随时跨屏可用）"
+                                    else -> "已关闭"
+                                },
+                                fontSize = 12.sp,
+                                color = if (isFloatingRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            )
+                        }
+                        Switch(
+                            checked = isFloatingRunning,
+                            onCheckedChange = { enable ->
+                                if (enable) {
+                                    val started = FloatingAssistantManager.startFloatingService(context)
+                                    isFloatingRunning = started
+                                } else {
+                                    FloatingAssistantManager.stopFloatingService(context)
+                                    isFloatingRunning = false
+                                }
+                            }
+                        )
+                    }
+
+                    if (!hasOverlay) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { FloatingAssistantManager.requestOverlayPermission(context) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("前往系统设置授予悬浮窗权限")
                         }
                     }
                 }

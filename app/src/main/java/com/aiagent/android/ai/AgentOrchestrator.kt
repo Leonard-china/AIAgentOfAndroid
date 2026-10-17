@@ -3,6 +3,7 @@ package com.aiagent.android.ai
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import com.aiagent.android.floating.FloatingAssistantManager
 import com.aiagent.android.model.ActionPlan
 import com.aiagent.android.model.ActionTarget
 import com.aiagent.android.model.ActionType
@@ -76,14 +77,15 @@ class AgentOrchestrator(
             7. 绝对禁止传输任何图片原始二进制或 Base64 数据！所有相册索引、SHA-256 分块查重、dHash 相似度计算全部在手机端本地离线引擎静默完成，不消耗网络与额外 Token。
             8. 本地工具返回给你的永远是高度精简的聚合统计数据（总大小、总数、精选前几项目录/ID）。只有在极少数必要情况下（用户明确要求查看某一个特定文件的具体信息时），才允许调用 query_file_detail 查询单文件详情，严禁全盘遍历！
 
-            【屏幕操作与连点器辅助能力】
+            【屏幕操作、连点器与桌面悬浮窗辅助能力】
             9. 你拥有通过受控无障碍服务操作屏幕的能力（类似于手机连点器与手势模拟）！当用户要求你点击屏幕、操作界面、返回、滑动或导航时，【绝对不要】以“系统安全限制”、“我无法操作屏幕”为由拒绝！
-            10. 屏幕操作工具说明：
+            10. 屏幕操作与桌面悬浮窗工具说明：
                 - 查找并点击界面文字或按钮：调用 operate_screen_click(text="文字")；
                 - 连点器坐标点击：调用 operate_screen_click(x=横坐标, y=纵坐标)；
                 - 滑动翻页：调用 operate_screen_swipe(direction="UP"|"DOWN"|"LEFT"|"RIGHT")；
                 - 返回或回桌面：调用 operate_screen_global_action(action="BACK"|"HOME")；
                 - 遇到不确定的界面时，可先调用 inspect_current_screen 获取屏幕可见文字摘要（纯文本解析，极省 Token，不消耗 Vision Token），再决定点击哪个按钮；
+                - 打开桌面悬浮窗：用户要求随时随地聊天或打开悬浮窗时调用 open_floating_window；
                 - 若提示无障碍服务尚未开启，可引导用户或调用 open_accessibility_settings 协助用户开启。
         """.trimIndent()
 
@@ -540,6 +542,23 @@ class AgentOrchestrator(
                 )
             }
 
+            lower.contains("悬浮窗") || lower.contains("悬浮球") || lower.contains("浮窗") -> {
+                val hasPermission = FloatingAssistantManager.hasOverlayPermission(context)
+                if (!hasPermission) {
+                    FloatingAssistantManager.requestOverlayPermission(context)
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "⚙️ 桌面悬浮窗需要「显示在其他应用上层」权限。已为您调起系统权限设置页面，开启后即可使用。"
+                    )
+                } else {
+                    FloatingAssistantManager.startFloatingService(context)
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "🎉 桌面悬浮窗助手已启动！您现在可以返回桌面或在任何第三方应用中使用屏幕悬浮球随时与我对话。"
+                    )
+                }
+            }
+
             else -> {
                 AiMessage(
                     sender = "ASSISTANT",
@@ -552,6 +571,7 @@ class AgentOrchestrator(
                         • **“查看截图文件”**：快速统计相册截屏
                         • **“找出旧安装包”**：清理残留的 APK 安装文件
                         • **“操作屏幕/连点器”**：点击界面文字、滑动翻页、模拟手势或查看屏幕元素
+                        • **“打开桌面悬浮窗”**：开启随时随地悬浮球跨屏对话
                         • **“打开系统存储页面”**：辅助导航至系统存储管理
                     """.trimIndent()
                 )
@@ -834,6 +854,16 @@ class AgentOrchestrator(
                         }
                         obj.toString()
                     }
+                }
+            }
+            "open_floating_window" -> {
+                val hasPermission = FloatingAssistantManager.hasOverlayPermission(context)
+                if (!hasPermission) {
+                    FloatingAssistantManager.requestOverlayPermission(context)
+                    "已为您打开系统悬浮窗权限设置页面，请允许「显示在其他应用上层」后即可启用桌面悬浮窗。"
+                } else {
+                    FloatingAssistantManager.startFloatingService(context)
+                    "已成功为您开启桌面悬浮窗助手！您可以返回桌面或切换到任意应用，点击屏幕边缘的悬浮球即可随时与我对话。"
                 }
             }
             else -> "未知工具: $name"

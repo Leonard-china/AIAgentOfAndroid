@@ -39,8 +39,15 @@
   - 纯本地引擎处理：相册扫描、SHA-256 分块查重、dHash 相似度聚类全部在设备端离线运行；
   - 极精简工具返回协议：大文件、重复分组、相似照片、截图及 APK 列表回传数量合理封顶（仅返回前 4~8 项关键摘要），剔除臃肿字段；
   - 新增 `query_file_detail` 单文件按需查询工具，仅在用户指明要查看某具体文件时调取，彻底根除 Token 爆炸风险。
+- [x] **桌面全局悬浮窗跨屏交互助手 (Floating Assistant Window)**：
+  - 基于 `FloatingAssistantService` 与 `WindowManager` 实现全局桌面悬浮交互；
+  - 折叠态：支持任意屏幕位置手指拖拽与吸附；
+  - 展开态：Material 3 迷你对话窗，集成快速动作 Chips、多轮对话流、实时执行进度卡片与操作确认预览卡片；
+  - 软键盘焦点与外部点击收起（`ACTION_OUTSIDE`）处理自适应；
+  - 支持设置页面手动开关、聊天指令（“打开悬浮窗”）及大模型 Function Calling（`open_floating_window`）无缝唤起；
+  - 荣耀 VKJ-AN00 (Android 16) `SYSTEM_ALERT_WINDOW` 权限生效，服务实测启动成功并生成有效悬浮图层。
 - [x] **单元测试与打包**：
-  - `.\gradlew.bat testDebugUnitTest` 14 项工具 Schema 与逻辑单元测试全量通过；
+  - `.\gradlew.bat testDebugUnitTest` 15 项工具 Schema 与逻辑单元测试全量通过；
   - `.\gradlew.bat assembleDebug` 全量通过并成功静默覆盖安装到真机。
 
 ### 2.2 已实现但未验证 (Implemented but Unverified)

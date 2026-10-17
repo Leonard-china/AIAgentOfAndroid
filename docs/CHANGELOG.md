@@ -190,4 +190,54 @@
   - 后续事项：可在设置界面提供可视化连点器悬浮窗或坐标校准小工具，进一步增强普通用户的直观操作体验。
 - **Git 提交标识**：`7003866`
 
+---
+
+## [2026-10-18 07:32:00] - 桌面全局悬浮窗跨屏交互助手全量落地
+
+- **变更摘要**：
+  - **跨屏悬浮窗交互引擎 (`FloatingAssistantService` & `FloatingAssistantManager`)**：
+    - 新增 `android.permission.SYSTEM_ALERT_WINDOW` 权限，基于 Android `WindowManager`（`TYPE_APPLICATION_OVERLAY`）构建系统级桌面悬浮交互；
+    - 实现 `FloatingLifecycleOwner`，将全套 Jetpack Compose、ViewModelStore 及 SavedState 桥接到后台服务中，实现零 Activity 依赖的声明式悬浮 UI；
+    - 落地双态自适应交互：
+      1. **折叠态（悬浮球）**：全屏手指拖拽、惯性贴边吸附，非聚集状态不阻挡下层应用触摸（`FLAG_NOT_FOCUSABLE`）；轻点即展开；
+      2. **展开态（悬浮对话窗）**：居中 Material 3 卡片，支持软键盘弹出（`SOFT_INPUT_ADJUST_RESIZE`），点击窗外区域（`ACTION_OUTSIDE`）自动折叠为悬浮球；
+    - 悬浮窗内置快捷 Chips（看当前屏幕、向下滑动、向上滑动、返回、存储设置、空间占用、重复照片）、实时任务步骤进度卡片与操作确认预览卡片；
+  - **触发与唤起链路全面打通**：
+    - 在【设置】界面增加“桌面悬浮窗助手”独立卡片与一键开关，支持权限检测与引导；
+    - 在【助手】主页快捷指令中增加“打开桌面悬浮窗”入口；
+    - 在 `ToolRegistry` 注册 `open_floating_window`（工具总数扩充至 15 个）；
+    - 在线大模型规划与离线规则规划引擎均完整支持“打开悬浮窗”意图解析与自动调起；
+  - 针对 Android 16 / MagicOS 10.0 通过 `appops` 授予悬浮窗权限，实测真机启动与图层渲染成功。
+- **修改原因**：
+  - 响应用户在手机任意界面、任意应用上方随时随地与 AI 助手对话并操作屏幕的强烈需求。
+- **涉及文件或模块**：
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/java/com/aiagent/android/floating/FloatingAssistantManager.kt`
+  - `app/src/main/java/com/aiagent/android/floating/FloatingAssistantService.kt`
+  - `app/src/main/java/com/aiagent/android/ai/ToolRegistry.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/main/java/com/aiagent/android/ui/SettingsScreen.kt`
+  - `app/src/main/java/com/aiagent/android/ui/AssistantScreen.kt`
+  - `app/src/test/java/com/aiagent/android/ToolRegistryTest.kt`
+  - `docs/ARCHITECTURE.md`
+  - `docs/HANDOFF.md`
+  - `docs/CHANGELOG.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. APK 构建：`.\gradlew.bat assembleDebug`；
+    3. 目标真机静默覆盖安装：`adb push` 到 `/data/local/tmp/app.apk` 后执行 `pm install -r -t -g`；
+    4. 悬浮窗启动测试：`adb shell am startservice -n com.aiagent.android.debug/com.aiagent.android.floating.FloatingAssistantService`；
+    5. WindowManager 图层检查：`adb shell dumpsys window windows | findstr "aiagent"` 检查悬浮窗 Window 状态；
+    6. 服务状态检查：`adb shell dumpsys activity services com.aiagent.android.debug`。
+  - 真实结果：
+    1. 单元测试 15 项工具全部验证通过（`BUILD SUCCESSFUL in 1m 27s`）；
+    2. APK 编译打包成功（`BUILD SUCCESSFUL in 30s`），静默安装成功（`Success`）；
+    3. 悬浮窗服务成功启动（`dumpsys activity services` 处于 ACTIVE 状态）；
+    4. `WindowManager` 成功分配 `SYSTEM_ALERT_WINDOW` 图层，触控区域 `touchableRegion=SkRegion((0,0,196,196))` 正常在屏幕上显示。
+- **已知问题与后续事项**：
+  - 已知问题：部分全屏沉浸式应用或横屏游戏下悬浮球位置可能需要根据横竖屏旋转动态调整。
+  - 后续事项：进一步增加横竖屏旋转监听器，自动在屏幕旋转时校准悬浮球贴边位置。
+
+
 
