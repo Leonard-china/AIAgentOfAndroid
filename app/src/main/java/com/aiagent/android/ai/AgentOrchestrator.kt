@@ -194,6 +194,13 @@ class AgentOrchestrator(
         val lower = userPrompt.lowercase()
 
         when {
+            lower.contains("开新对话") || lower.contains("新建对话") || lower.contains("清空对话") || lower.contains("重新开始") -> {
+                AiMessage(
+                    sender = "ASSISTANT",
+                    content = "✨ 已为您开启新对话！之前的上下文已重置，您可以随时向我提出新的文件管理或屏幕操作需求。"
+                )
+            }
+
             lower.contains("占空间") || lower.contains("什么最占") || lower.contains("存储") -> {
                 steps.add(TaskStep(1, "查询设备闪存物理占用与分类", "RUNNING", "正在调用底层 StatFs 与 MediaStore..."))
                 onStepUpdated(steps.toList())

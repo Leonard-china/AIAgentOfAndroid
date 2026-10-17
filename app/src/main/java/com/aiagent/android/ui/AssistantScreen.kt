@@ -35,11 +35,13 @@ fun AssistantScreen(
     onSendMessage: (String) -> Unit,
     onConfirmPlan: (ActionPlan) -> Unit,
     onCancelPlan: (ActionPlan) -> Unit,
+    onNewChat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var inputText by remember { mutableStateOf("") }
 
     val quickPrompts = listOf(
+        "➕ 开新对话",
         "打开桌面悬浮窗",
         "看看手机里什么最占空间",
         "找出超过 500MB 的视频",
@@ -63,6 +65,59 @@ fun AssistantScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
+        // Top App Header with "开新对话" Action
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SmartToy,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(26.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "AI 智能管家",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "真实数据与可撤销操作闭环",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        fontSize = 11.sp
+                    )
+                }
+
+                // "开新对话" Button
+                FilledTonalButton(
+                    onClick = onNewChat,
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "开新对话",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("开新对话", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
         // Message & Action Stream
         LazyColumn(
             state = listState,
@@ -99,7 +154,11 @@ fun AssistantScreen(
                 SuggestionChip(
                     onClick = {
                         if (!isProcessing) {
-                            onSendMessage(prompt)
+                            if (prompt == "➕ 开新对话") {
+                                onNewChat()
+                            } else {
+                                onSendMessage(prompt)
+                            }
                         }
                     },
                     label = { Text(prompt, fontSize = 12.sp) },

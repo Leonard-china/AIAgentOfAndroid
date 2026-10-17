@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
                             activeSteps = activeSteps,
                             isProcessing = isProcessing,
                             onSendMessage = { prompt -> handleUserPrompt(prompt) },
+                            onNewChat = { startNewChat() },
                             onConfirmPlan = { plan -> executeActionPlan(plan) },
                             onCancelPlan = { plan -> cancelActionPlan(plan) },
                             modifier = Modifier.padding(innerPadding)
@@ -332,7 +333,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startNewChat() {
+        messages.clear()
+        activeSteps.clear()
+        isProcessing = false
+        messages.add(
+            AiMessage(
+                sender = "ASSISTANT",
+                content = "✨ 已为您开启新对话！之前的会话上下文与历史任务已重置。您可以随时向我咨询手机存储、查找大文件、清理相册或协助操作屏幕。"
+            )
+        )
+    }
+
     private fun handleUserPrompt(prompt: String) {
+        val trimmed = prompt.trim().removePrefix("➕").trim()
+        if (trimmed == "开新对话" || trimmed == "新建对话" || trimmed == "清空对话" || trimmed == "重新开始") {
+            startNewChat()
+            return
+        }
+
         val currentHistory = messages.toList()
         messages.add(AiMessage(sender = "USER", content = prompt))
         isProcessing = true

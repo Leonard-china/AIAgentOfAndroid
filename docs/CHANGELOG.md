@@ -239,6 +239,46 @@
   - 已知问题：部分全屏沉浸式应用或横屏游戏下悬浮球位置可能需要根据横竖屏旋转动态调整。
   - 后续事项：进一步增加横竖屏旋转监听器，自动在屏幕旋转时校准悬浮球贴边位置。
 - **Git 提交标识**：`284a514`
+---
+
+## [2026-10-18 07:42:00] - 助手主页与桌面悬浮窗“开新对话”功能全量落地
+
+- **变更摘要**：
+  - **主界面与桌面悬浮窗多重重置入口闭环**：
+    1. **主应用助手页面 (`AssistantScreen`)**：在顶部新增应用 Header Bar，提供明确的 `FilledTonalButton("开新对话")` 按钮，并在常用建议 Chip 栏首位加入 `"➕ 开新对话"` 快捷入口；
+    2. **桌面悬浮窗 (`FloatingAssistantService`)**：在展开态顶部标题栏右侧加入 `IconButton("开新对话")`，并在悬浮快捷 Chips 栏首位加入 `"➕ 开新对话"`；
+    3. **物理上下文清空机制 (`startNewChat()`)**：清空当前会话消息列表 (`messages.clear()`)、清空进行中任务步骤与操作卡片 (`activeSteps.clear()`)、重置加载态 (`isProcessing = false`)，并输出专属初始欢迎引导语；
+    4. **自然语言与指令级直接拦截**：在 `MainActivity` 与 `FloatingAssistantService` 的 `handleUserPrompt` 开头直接拦截“开新对话”、“新建对话”、“清空对话”、“重新开始”等指令，无需消耗大模型 Token 即可瞬间无缝物理重置；
+    5. **AI 编排引擎兜底 (`AgentOrchestrator`)**：在离线规划引擎中加入新会话意图匹配分支，返回新会话已就绪引导。
+- **修改原因**：
+  - 响应用户关于“怎么没有开新对话的功能”的核心反馈，解决用户在完成多轮任务（如存储清理、屏幕手势操作）后需要完全清空历史上下文、不受前序多轮提示词干扰、快速开启全新管理任务的刚需。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/ui/AssistantScreen.kt`
+  - `app/src/main/java/com/aiagent/android/ui/MainActivity.kt`
+  - `app/src/main/java/com/aiagent/android/floating/FloatingAssistantService.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `docs/HANDOFF.md`
+  - `docs/CHANGELOG.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：运行 `.\gradlew.bat testDebugUnitTest`；
+    2. APK 编译：运行 `.\gradlew.bat assembleDebug`；
+    3. 真机静默安装：推送到 `/data/local/tmp/app.apk` 并通过 `pm install -r -t -g` 覆盖安装到荣耀 VKJ-AN00 (Android 16)；
+    4. 真机 UI 树提取核验：通过 `uiautomator dump` 提取界面层次，确认 `开新对话` 按钮（`[995,205][1166,275]`）与 `➕ 开新对话` Chip（`[98,1901][332,1971]`）均渲染成功；
+    5. 真机端到端重置测试：
+       - 点击常用提问 Chip 输入内容生成历史对话；
+       - 通过 `input tap 1045 240` 点击顶部“开新对话”按钮，重新抓取 UI 树核验；
+       - 通过 `input tap 200 1935` 点击快捷 Chip“➕ 开新对话”，核验重置行为。
+  - 真实结果：
+    1. 单元测试全部通过（`BUILD SUCCESSFUL in 39s`）；
+    2. APK 编译成功（`BUILD SUCCESSFUL in 18s`），真机安装输出 `Success`；
+    3. 点击顶部“开新对话”与点击快捷 Chip 后，屏幕对话历史瞬间物理清空，并成功展示新会话提示：`✨ 已为您开启新对话！之前的会话上下文与历史任务已重置。您可以随时向我咨询手机存储、查找大文件、清理相册或协助操作屏幕。`；
+    4. 真机功能闭环完全正常。
+- **已知问题与后续事项**：
+  - 已知问题：目前会话重置为内存状态重置，后续可根据需求扩展历史对话多会话存档与列表切换功能。
+  - 后续事项：根据用户后续反馈继续增强本地大模型或更多细分场景的文件管理工具。
+- **Git 提交标识**：`8065ded`
+
 
 
 

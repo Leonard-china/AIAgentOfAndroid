@@ -226,7 +226,25 @@ class FloatingAssistantService : Service() {
         }
     }
 
+    private fun startNewChat() {
+        messages.clear()
+        activeSteps.clear()
+        isProcessing = false
+        messages.add(
+            AiMessage(
+                sender = "ASSISTANT",
+                content = "✨ 已为您开启新对话！之前的会话上下文与历史任务已重置。您可以随时对我说出新的文件管理或屏幕操作需求。"
+            )
+        )
+    }
+
     private fun handleUserPrompt(prompt: String) {
+        val trimmed = prompt.trim().removePrefix("➕").trim()
+        if (trimmed == "开新对话" || trimmed == "新建对话" || trimmed == "清空对话" || trimmed == "重新开始") {
+            startNewChat()
+            return
+        }
+
         val currentHistory = messages.toList()
         messages.add(AiMessage(sender = "USER", content = prompt))
         isProcessing = true
@@ -370,6 +388,18 @@ class FloatingAssistantService : Service() {
                                     fontSize = 11.sp
                                 )
                             }
+                            // New chat button
+                            IconButton(
+                                onClick = { startNewChat() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddComment,
+                                    contentDescription = "开新对话",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                             // Minimize button
                             IconButton(
                                 onClick = { setExpandedState(false) },
@@ -404,6 +434,7 @@ class FloatingAssistantService : Service() {
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         val quickChips = listOf(
+                            "➕ 开新对话" to "开新对话",
                             "🖥️ 看当前屏幕" to "查看当前屏幕有什么",
                             "⬇️ 向下滑动" to "向下滑动屏幕",
                             "⬆️ 向上滑动" to "向上滑动屏幕",
@@ -416,7 +447,11 @@ class FloatingAssistantService : Service() {
                             SuggestionChip(
                                 onClick = {
                                     if (!isProcessing) {
-                                        handleUserPrompt(prompt)
+                                        if (prompt == "开新对话") {
+                                            startNewChat()
+                                        } else {
+                                            handleUserPrompt(prompt)
+                                        }
                                     }
                                 },
                                 label = { Text(label, fontSize = 11.sp) },

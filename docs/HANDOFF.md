@@ -46,6 +46,11 @@
   - 软键盘焦点与外部点击收起（`ACTION_OUTSIDE`）处理自适应；
   - 支持设置页面手动开关、聊天指令（“打开悬浮窗”）及大模型 Function Calling（`open_floating_window`）无缝唤起；
   - 荣耀 VKJ-AN00 (Android 16) `SYSTEM_ALERT_WINDOW` 权限生效，服务实测启动成功并生成有效悬浮图层。
+- [x] **全场景“开新对话”与上下文物理重置闭环 (New Chat & Context Reset)**：
+  - 主应用助手页面顶部新增 Header Bar，集成 `FilledTonalButton("开新对话")` 按钮及快捷 Chip；
+  - 桌面悬浮窗标题栏集成 `IconButton("开新对话")` 图标按钮及悬浮快捷 Chip；
+  - 彻底清空内存中累积的消息上下文 (`messages.clear()`)、实时任务步骤 (`activeSteps.clear()`) 并输出全新就绪欢迎语；
+  - 支持自然语言和快捷指令拦截（“开新对话/新建对话/清空对话/重新开始”），真机端到端点击与触控验证 100% 成功。
 - [x] **单元测试与打包**：
   - `.\gradlew.bat testDebugUnitTest` 15 项工具 Schema 与逻辑单元测试全量通过；
   - `.\gradlew.bat assembleDebug` 全量通过并成功静默覆盖安装到真机。
@@ -58,6 +63,7 @@
 - [ ] **扩展增量功能**：
   - 基于端侧 NPU/TFLite 的图片本地 Embedding 语义搜图；
   - SAF 自选目录全盘树形重命名与跨卷物理移动；
+  - 历史多会话列表与对话归档切换；
   - 正式发布用签名证书配置。
 
 ---
@@ -94,5 +100,5 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start
 ## 5. 当前代码与提交信息
 
 - **当前分支**：`master`
-- **最新提交 Commit**：`284a514`
-- **最新代码状态**：所有代码、资源、配置与文档均已就绪并全量构建验证通过。
+- **最新提交 Commit**：`8065ded`
+- **最新代码状态**：所有代码、资源、配置与文档均已就绪并全量构建并在真机上验证通过。
