@@ -1,16 +1,17 @@
 package com.aiagent.android.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,238 +37,169 @@ fun AssistantScreen(
     onConfirmPlan: (ActionPlan) -> Unit,
     onCancelPlan: (ActionPlan) -> Unit,
     onNewChat: () -> Unit,
+    onStopTask: () -> Unit,
+    onOpenSettings: () -> Unit,
+    screenConnected: Boolean,
+    modelLabel: String,
     modifier: Modifier = Modifier
 ) {
     var inputText by remember { mutableStateOf("") }
-
-    val quickPrompts = listOf(
-        "➕ 开新对话",
-        "打开桌面悬浮窗",
-        "看看手机里什么最占空间",
-        "找出超过 500MB 的视频",
-        "排查重复照片",
-        "整理相册截图",
-        "找出下载目录里的安装包",
-        "打开系统存储管理页面"
-    )
-
     val listState = rememberLazyListState()
-
-    LaunchedEffect(messages.size, activeSteps.size) {
-        val totalCount = messages.size + if (isProcessing && activeSteps.isNotEmpty()) 1 else 0
-        if (totalCount > 0) {
-            listState.animateScrollToItem(totalCount - 1)
-        }
+    LaunchedEffect(messages.size, activeSteps.size, isProcessing) {
+        val count = messages.size + if (isProcessing) 1 else 0
+        if (count > 0) listState.animateScrollToItem(count - 1)
     }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Top App Header with "开新对话" Action
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.SmartToy,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(26.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "AI 智能管家",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "真实数据与可撤销操作闭环",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        fontSize = 11.sp
-                    )
-                }
-
-                // "开新对话" Button
-                FilledTonalButton(
-                    onClick = onNewChat,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "开新对话",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("开新对话", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                }
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.onBackground) {
+                Icon(Icons.Default.Terminal, null, Modifier.padding(10.dp).size(22.dp), tint = MaterialTheme.colorScheme.background)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Pocket Agent", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("你的手机任务助手", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onNewChat, enabled = !isProcessing) {
+                Icon(Icons.Default.Add, contentDescription = "新建对话")
             }
         }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-        // Message & Action Stream
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(messages) { msg ->
-                MessageItem(
-                    message = msg,
-                    onConfirmPlan = onConfirmPlan,
-                    onCancelPlan = onCancelPlan
-                )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(onClick = onOpenSettings, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (screenConnected) SuccessGreen else MaterialTheme.colorScheme.outline))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (screenConnected) "屏幕已连接" else "连接屏幕操作", style = MaterialTheme.typography.labelSmall)
+                }
             }
-
-            // Real-time task execution progress steps
-            if (isProcessing && activeSteps.isNotEmpty()) {
+            Spacer(Modifier.weight(1f))
+            Text(modelLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable(onClick = onOpenSettings).widthIn(max = 170.dp), maxLines = 1)
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+        if (messages.isEmpty() && !isProcessing) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
-                    ActiveStepsCard(steps = activeSteps)
+                    Spacer(Modifier.height(24.dp))
+                    Text("从一个目标开始", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(12.dp))
+                    Text("把手机上的事\n交给我。", fontSize = 32.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("打开应用、搜索内容、接着完成操作。\n执行过程随时可见，也随时可以停止。", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 23.sp)
+                    Spacer(Modifier.height(18.dp))
+                }
+                item { GoalSuggestion("跨应用完成任务", "搜索内容，再打开结果", Icons.Default.TouchApp) {
+                    inputText = "在哔哩哔哩搜索 3Blue1Brown，打开一个数学视频"
+                } }
+                item { GoalSuggestion("看看当前屏幕", "读取界面，帮我找到下一步", Icons.Default.CenterFocusStrong) {
+                    inputText = "看看当前屏幕，告诉我有哪些可以操作的内容"
+                } }
+                item { GoalSuggestion("整理手机空间", "用本地工具找出大文件", Icons.Default.FolderOpen) {
+                    inputText = "找出超过 500MB 的视频，先列出来给我看"
+                } }
+            }
+        } else {
+            LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                items(messages, key = { it.id }) { message -> MessageItem(message, onConfirmPlan, onCancelPlan) }
+                if (isProcessing) item {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(activeSteps.lastOrNull()?.title ?: "正在规划任务", style = MaterialTheme.typography.labelMedium)
+                        }
+                        if (activeSteps.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            ActiveStepsCard(activeSteps)
+                        }
+                    }
                 }
             }
         }
-
-        // Quick suggestions row
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(quickPrompts) { prompt ->
-                SuggestionChip(
-                    onClick = {
-                        if (!isProcessing) {
-                            if (prompt == "➕ 开新对话") {
-                                onNewChat()
-                            } else {
-                                onSendMessage(prompt)
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp)) {
+            Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Column(Modifier.padding(8.dp)) {
+                    TextField(value = inputText, onValueChange = { inputText = it },
+                        placeholder = { Text("告诉我，你想完成什么…", fontSize = 14.sp) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp, max = 140.dp),
+                        enabled = !isProcessing, maxLines = 5,
+                        colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent))
+                    Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Smartphone, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (isProcessing) "正在操作 · 可随时停止" else "手机任务", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.weight(1f))
+                        FilledIconButton(onClick = {
+                            if (isProcessing) onStopTask() else if (inputText.isNotBlank()) {
+                                val prompt = inputText.trim(); inputText = ""; onSendMessage(prompt)
                             }
+                        }, enabled = isProcessing || inputText.isNotBlank(), modifier = Modifier.size(40.dp), shape = CircleShape) {
+                            Icon(if (isProcessing) Icons.Default.Stop else Icons.Default.ArrowUpward,
+                                contentDescription = if (isProcessing) "停止任务" else "发送任务", modifier = Modifier.size(21.dp))
                         }
-                    },
-                    label = { Text(prompt, fontSize = 12.sp) },
-                    enabled = !isProcessing
-                )
-            }
-        }
-
-        // Input Bar
-        Surface(
-            tonalElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder = { Text("输入您的任务需求，如：找出大视频...") },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(24.dp),
-                    maxLines = 3,
-                    enabled = !isProcessing
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                IconButton(
-                    onClick = {
-                        if (inputText.isNotBlank() && !isProcessing) {
-                            onSendMessage(inputText.trim())
-                            inputText = ""
-                        }
-                    },
-                    enabled = inputText.isNotBlank() && !isProcessing,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (inputText.isNotBlank() && !isProcessing)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant
-                        )
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "发送",
-                        tint = if (inputText.isNotBlank() && !isProcessing)
-                            MaterialTheme.colorScheme.onPrimary
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    }
                 }
             }
+            Text("重要操作由你确认", Modifier.fillMaxWidth().padding(top = 8.dp),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 }
 
 @Composable
-fun MessageItem(
-    message: AiMessage,
-    onConfirmPlan: (ActionPlan) -> Unit,
-    onCancelPlan: (ActionPlan) -> Unit
-) {
-    val isUser = message.sender == "USER"
+private fun GoalSuggestion(title: String, description: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f))) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
+        }
+    }
+}
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
-    ) {
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
-            ),
-            color = if (isUser)
-                MaterialTheme.colorScheme.primary
-            else
-                MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 340.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = message.content,
-                    color = if (isUser)
-                        MaterialTheme.colorScheme.onPrimary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
+@Composable
+private fun MessageItem(message: AiMessage, onConfirmPlan: (ActionPlan) -> Unit, onCancelPlan: (ActionPlan) -> Unit) {
+    val user = message.sender == "USER"
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
+        if (user) {
+            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.widthIn(max = 320.dp)) {
+                SelectionContainer { Text(message.content, Modifier.padding(horizontal = 16.dp, vertical = 12.dp), fontSize = 15.sp, lineHeight = 24.sp) }
+            }
+        } else {
+            val label = when (message.taskStatus) {
+                "COMPLETED" -> "已核验界面"
+                "NEEDS_USER" -> "需要你接手"
+                "BLOCKED", "INCOMPLETE" -> "尚未完成"
+                "CANCELLED" -> "已停止"
+                else -> "Pocket Agent"
+            }
+            Text(label, style = MaterialTheme.typography.labelMedium,
+                color = if (message.taskStatus in listOf("BLOCKED", "INCOMPLETE")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            SelectionContainer { Text(message.content, fontSize = 15.sp, lineHeight = 25.sp) }
+            if (message.taskSteps.isNotEmpty()) {
+                var expanded by remember { mutableStateOf(false) }
+                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
+                    Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, Modifier.size(18.dp))
+                    Text("${message.taskSteps.size} 个执行步骤", style = MaterialTheme.typography.labelMedium)
+                }
+                if (expanded) ActiveStepsCard(message.taskSteps)
             }
         }
-
-        // Action Plan Preview Card
         message.plan?.let { plan ->
-            Spacer(modifier = Modifier.height(8.dp))
-            ActionPlanPreviewCard(
-                plan = plan,
-                onConfirm = { onConfirmPlan(plan) },
-                onCancel = { onCancelPlan(plan) }
-            )
+            Spacer(Modifier.height(12.dp))
+            ActionPlanPreviewCard(plan, { onConfirmPlan(plan) }, { onCancelPlan(plan) })
         }
     }
 }

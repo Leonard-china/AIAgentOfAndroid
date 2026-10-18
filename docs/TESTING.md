@@ -47,6 +47,8 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe install -r app
 
 ## 3. 关键测试用例与边界覆盖
 
+> 本节表格保留此前阶段记录；本轮最新结果为 §6：8 个测试类、29 项，0 失败。
+
 根据产品规范，测试必须覆盖以下关键行为与风险点：
 
 | 测试模块 | 用例名称 | 测试目标与验证点 | 实测结果 |
@@ -85,3 +87,38 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe install -r app
 所有测试结果必须如实记录在 `docs/CHANGELOG.md` 与 `docs/HANDOFF.md` 中：
 - 本地构建与单元测试：标明具体执行时间、命令与结果状态；
 - 真机验证：仅当真实物理机连接并完成交互时方可记录为“真机已验证”，记录具体测试结果；无真机在线时明确标注为“代码已完成，待真机联调”。
+
+
+## 6. 手机跨应用执行闭环验证（2026-10-18）
+
+### 本地回归
+
+- 实际命令：`.\gradlew.bat testDebugUnitTest assembleDebug assembleRelease`，最终 BUILD SUCCESSFUL（24s），8 类 29 项均实际执行通过。
+- 新增 `AgentLoopTest` 7 项：防提前结束、快照和原文证据校验、失败工具不完成、无进展限制、需接手停止批次、取消传播、动作预算。
+- 新增 `LlmClientCancellationTest`：本机 ServerSocket 返回未完整结束的 HTTP 响应体，取消协程后 2 秒内请求结束且服务端观察到 socket 断开；不使用线上 API Key。
+- 原有 21 项测试保留，总计 8 类 29 项。
+
+### 实机执行记录
+
+- 设备：荣耀 VKJ-AN00 / Android 16 / MagicOS 10.0 / AXRBUT6520002413。
+- 模型：设备已配置的 qwen-plus，未读取/导出 API Key。
+- 任务：“在哔哩哔哩搜索 3Blue1Brown，打开一个数学视频”。由 ADB 点击主界面示例和发送，后续点击/搜索均由应用自身执行；ADB 只截屏观察，未代替应用完成任务。
+- 已观察结果：9 个工具步骤后进入 3Blue1Brown 官方《AI 未能解决的最后一道 IMO 真题》详情页，前后截图的视频画面持续变化；助手结果引用准确标题并显示“已核验界面”。这只证明该机该任务，不是跨应用通用成功率。
+- 会话连续性：切回主界面保留步骤和答复；打开浮窗可看到同一历史。后续移除浮窗启动时插入的欢迎消息。
+- 停止测试发现：原 HUD 在 show 中调用 dismissInternal 后清空了停止回调，出现点停止后继续执行。已修回调绑定顺序。修复后分别启动任务，在约 500ms 后点击顶部 HUD 停止、主界面停止，均呈现“已停止任务”并恢复发送入口，日志出现 task cancelled by user；截图 hud-stopped.png、main-stopped.png。
+
+### 避免测试工具干扰
+
+**不要在应用自主操作期间运行普通 `adb shell uiautomator dump`。** 本轮第二次尝试使用该命令后，看到无障碍服务临时断开，任务正确以 NEEDS_USER 结束，之后服务重连；该样本不是有效的停止验收。UiAutomation 默认抑制其他无障碍服务，参见 [Android UiAutomation 文档](https://developer.android.com/reference/android/app/UiAutomation#FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)。运行中使用 `adb shell screencap` 和仅元数据日志观察；如采用自定义 instrumentation，连接时使用 DONT_SUPPRESS 标志。
+
+主动通过 ADB 拉回主界面会改变智能体的当前屏幕，也会干扰在途目标；应先停止任务再切回，或等任务结束。
+
+本地截图、UI XML 与 APK 校验文件放在被 Git 忽略的 `artifacts/2026-10-18-review/`，不把设备个人内容提交到仓库。截图视觉理解、自绘界面与长任务压力尚未验收。
+
+
+### 最终安装版复验
+
+- 最终 APK SHA-256：`2db2c2cfcdf4ac41c6578c8c84b6e01b4ab3b46d439d5880c5e0e9f748a30dc8`；apksigner verify 退出码 0；设备 pm install -r -t 返回 Success。
+- 再次提交同一 3Blue1Brown 目标，从上次已打开的视频状态起步，自主执行 10 步，日志 COMPLETED，已进入相同数学视频详情且可观察到视频画面；未用 ADB 代替应用点击搜索或视频。
+- 最终页面报告使用“简介”作为 finish_task 原文证据；这能证明来自当前屏幕，但无法独立证明完整语义目标。仍需补强完成标准与证据质量；本次播放由测试者另行通过截图观察确认。
+- 版本更新后首页真实显示“屏幕已连接”；测试结束已回到主应用结果页，已停止本轮主机 logcat 观察进程。

@@ -116,30 +116,18 @@ object ToolRegistry {
             }
         ))
 
-        // 9. operate_screen_click
+        // Targets must come from the latest local screen snapshot.
         tools.add(createToolFunction(
             name = "operate_screen_click",
-            description = "模拟屏幕点击操作（支持连点器手势模式与文字按钮匹配）：可通过文字匹配点击，或直接指定屏幕坐标 (x, y) 模拟手势点击",
+            description = "点击最新 screen 中的真实控件。提供 snapshot_id 和 node_id；可用唯一的完整 text 作为备选。禁止猜测控件。",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
-                val props = JsonObject().apply {
-                    val textProp = JsonObject().apply {
-                        addProperty("type", "string")
-                        addProperty("description", "要点击的屏幕文字或按钮名称（例如：'设置'、'存储空间'、'确认'）")
+                add("properties", JsonObject().apply {
+                    listOf("snapshot_id", "node_id", "text").forEach { key ->
+                        add(key, JsonObject().apply { addProperty("type", "string") })
                     }
-                    val xProp = JsonObject().apply {
-                        addProperty("type", "number")
-                        addProperty("description", "点击的屏幕横坐标 X（像素），用于连点器坐标点击")
-                    }
-                    val yProp = JsonObject().apply {
-                        addProperty("type", "number")
-                        addProperty("description", "点击的屏幕纵坐标 Y（像素），用于连点器坐标点击")
-                    }
-                    add("text", textProp)
-                    add("x", xProp)
-                    add("y", yProp)
-                }
-                add("properties", props)
+                })
+                add("required", JsonArray().apply { add("snapshot_id") })
             }
         ))
 
@@ -184,7 +172,7 @@ object ToolRegistry {
         // 12. inspect_current_screen
         tools.add(createToolFunction(
             name = "inspect_current_screen",
-            description = "【极度省 Token 纯文本】获取当前屏幕上可见的文本、按钮及坐标摘要，不耗费视觉 Token。在需要点击前可先查看屏幕上有哪些元素",
+            description = "读取当前应用的真实无障碍控件，返回 snapshot_id、node id、文本、角色、边界和状态。自绘或受保护画面可能不可读。",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
                 add("properties", JsonObject())
@@ -233,7 +221,7 @@ object ToolRegistry {
         // 16. launch_app
         tools.add(createToolFunction(
             name = "launch_app",
-            description = "【原生启动】在手机上直接启动指定的已安装应用程序（例如：B站/哔哩哔哩、微信、支付宝、相册、相机、设置、抖音、音乐等）。优先通过原生 Intent 秒级调起应用，并在本地毫秒级自动跳过开屏广告！严禁使用屏幕点击去瞎点聊天界面的文字！",
+            description = "通过原生 Intent 启动本机已安装的应用，并返回当前 screen。必须观察真实界面再继续搜索或后续操作；发出启动请求不代表目标完成。",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
                 val props = JsonObject().apply {
@@ -252,7 +240,7 @@ object ToolRegistry {
         // 17. operate_screen_input
         tools.add(createToolFunction(
             name = "operate_screen_input",
-            description = "模拟文本输入操作：在当前屏幕的输入框（如搜索栏、聊天消息输入框）中自动填入文字，支持可选自动点击搜索/提交确认",
+            description = "在最新 screen 中的真实输入框填写文本。必须提供 snapshot_id，推荐 node_id。submit 默认 false；true 仅发出输入法提交动作，不会点击其他内容。",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
                 val props = JsonObject().apply {
@@ -262,13 +250,15 @@ object ToolRegistry {
                     }
                     val submitProp = JsonObject().apply {
                         addProperty("type", "boolean")
-                        addProperty("description", "输入后是否自动点击搜索或确定提交（默认 true）")
+                        addProperty("description", "输入后是否发出输入法提交动作（默认 false）；发送消息需用户已明确授权")
                     }
                     add("text", textProp)
                     add("submit", submitProp)
+                    add("snapshot_id", JsonObject().apply { addProperty("type", "string") })
+                    add("node_id", JsonObject().apply { addProperty("type", "string") })
                 }
                 add("properties", props)
-                val required = JsonArray().apply { add("text") }
+                val required = JsonArray().apply { add("text"); add("snapshot_id") }
                 add("required", required)
             }
         ))
@@ -322,6 +312,24 @@ object ToolRegistry {
             }
         ))
 
+        tools.add(createToolFunction(
+            name = "finish_task",
+            description = "屏幕任务的结束报告。completed 必须引用最新 snapshot_id 和实际节点原文 evidence；受阻或需用户接手用 blocked/needs_user，summary 说明具体原因。",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject().apply {
+                    listOf("status", "summary", "snapshot_id", "evidence").forEach { key ->
+                        add(key, JsonObject().apply {
+                            addProperty("type", "string")
+                            if (key == "status") add("enum", JsonArray().apply {
+                                add("completed"); add("blocked"); add("needs_user")
+                            })
+                        })
+                    }
+                })
+                add("required", JsonArray().apply { add("status"); add("summary") })
+            }
+        ))
         return tools
     }
 

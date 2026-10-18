@@ -680,3 +680,35 @@
 
 
 
+
+
+## [2026-10-18 11:51:34] - 手机跨应用任务智能体第一轮纠偏（验证进行中）
+
+- **原因与摘要**：用户反馈任务无法完成且 UI 不符合手机智能体定位。检查发现在线循环仅 6 轮、普通控件误标视频、输入后暗含视频点击、工具失败步骤仍完成、耗尽预算兜底成功。已改为通用 AgentLoop、真实屏幕快照控件引用、动作后回读、带证据结束、取消与并发保护，并重做助手主界面及三主导航。
+- **涉及文件/模块**：ai/AgentLoop.kt（新增）、ai/AgentOrchestrator.kt、ai/LlmClient.kt、ai/ToolRegistry.kt、screen/ScreenSession.kt（新增）、model/Models.kt、ui/AssistantScreen.kt、ui/MainActivity.kt、ui/Theme.kt、floating/FloatingAssistantService.kt、AgentLoopTest.kt（新增）、ToolRegistryTest.kt、.gitignore、docs/PRODUCT.md、ARCHITECTURE.md、HANDOFF.md；最终验证后同步 TESTING.md 和 README.md。
+- **真实验证**：基线 Gradle 返回成功但测试为 UP-TO-DATE；首次新代码编译因 Kotlin 可空目标与不存在图标失败，已修复。第二次构建已完成 Debug 编译/打包及测试实际执行，7 类 28 项、0 失败/0 错误；Release 完整任务仍在进行，尚不记录为完成。
+- **真机证据**：ADB 设备在线。旧版本停在 UP 主个人主页，主会话泛化回复已进入目标界面；新版尚未安装验收。截图在本地忽略目录 artifacts/2026-10-18-review/。
+- **已知限制**：没有截图视觉能力；目前语义完成判断仍依赖模型，代码只验证最新屏幕证据；会话未持久化。不得把本地测试写成通用真机成功。
+- **Commit**：未提交；开始时 HEAD 4de95e4。
+
+
+## [2026-10-18 12:01:56] - 实机跑通跨应用搜索与视频打开，并发现悬浮停止缺陷
+
+- **变更摘要与原因**：主界面、悬浮窗与就地续聊已统一为应用级 `AgentConversation`；移除旧 B 站坐标猜测与隐藏点击代码。实机停止测试发现 `ScreenActionHud.show` 在赋值后调用 dismissInternal 清空 currentOnStop，已改为清理后重新绑定；移除悬浮窗启动时注入共享会话的欢迎消息，补充 adjustResize 和真实屏幕数据说明。
+- **涉及文件**：新增 ai/AgentConversation.kt、LlmClientCancellationTest.kt；调整 AIAgentApplication.kt、screen/ScreenAssistantAccessibilityService.kt、screen/ScreenActionHud.kt、floating/FloatingAssistantService.kt、ui/SettingsScreen.kt、AndroidManifest.xml、ui/MainActivity.kt、ui/Theme.kt 及相关文档。
+- **真实验证**：上一完整版本 `testDebugUnitTest assembleRelease` BUILD SUCCESSFUL（34s），8 个测试类、29 个用例均通过。新增本地 HTTP 不完整响应测试证明协程取消后请求 socket 关闭，无需等待 45s 读取超时。Release 已安装成功（普通安装经设备显示的确认页继续，结果 Success）。
+- **实机任务**：荣耀 VKJ-AN00 / Android 16 / qwen-plus，用户授权手机测试；仅通过主界面快捷任务提交“在哔哩哔哩搜索 3Blue1Brown，打开一个数学视频”。后续由应用自主操作，9 步完成，已看到《AI 未能解决的最后一道 IMO 真题》详情页与连续变化的视频画面；应用报告 COMPLETED 并引用真实视频标题。证据：本地 artifacts/2026-10-18-review/task2.png、completion.png、report.xml、report.png。
+- **测试干扰与问题**：第二次停止测试在运行中使用 `uiautomator dump`，造成无障碍服务暂时被抑制，应用以 NEEDS_USER 结束；此轮不作为停止通过依据。后续截图测试确认原悬浮停止按钮失效，代码已修，正在重建和复测。主动切回主应用也会改变目标界面，导致模型如实报告未完成，不能当作自然任务失败率样本。
+- **已知限制**：当前仅验证单一 B 站场景，不能推导通用应用成功率；尚无截图视觉与会话磁盘持久化。
+- **Commit**：未提交，HEAD 4de95e4。
+
+
+## [2026-10-18 12:08:18] - 第一轮重构最终验证与交接完成
+
+- **变更摘要与原因**：完成通用跨应用闭环、共享会话、工作台、可取消网络请求、HUD 回调修复的最终验收。补充无障碍连接 StateFlow，修复安装后状态提示滞后；onInterrupt 不再误标解绑，离线屏幕操作遵守开关；输入法 adjustResize 与设置数据说明同步。
+- **涉及文件**：ai/AgentConversation.kt、AgentLoop.kt、AgentOrchestrator.kt、LlmClient.kt、ToolRegistry.kt；screen/ScreenSession.kt、ScreenAssistantAccessibilityService.kt、ScreenActionHud.kt；ui/AssistantScreen.kt、MainActivity.kt、SettingsScreen.kt、Theme.kt；floating/FloatingAssistantService.kt；AIAgentApplication.kt、model/Models.kt、AndroidManifest.xml；AgentLoopTest.kt、LlmClientCancellationTest.kt、ToolRegistryTest.kt；.gitignore；docs/README.md、PRODUCT.md、ARCHITECTURE.md、TESTING.md、HANDOFF.md、CHANGELOG.md。
+- **命令与真实结果**：`.\gradlew.bat testDebugUnitTest assembleDebug assembleRelease` BUILD SUCCESSFUL（24s）；XML 汇总 8 类 / 29 项 / 0 failures / 0 errors / 0 skipped。`apksigner verify` 退出码 0；`git diff --check` 无错误。CHANGELOG 与 Git HEAD 历史前缀比较一致，全部历史保留。
+- **最终 APK 与安装**：46,023,277 bytes；SHA-256 `2db2c2cfcdf4ac41c6578c8c84b6e01b4ab3b46d439d5880c5e0e9f748a30dc8`；ADB push 后 `pm install -r -t` 返回 Success，荣耀 VKJ-AN00 / Android 16。
+- **真实行为**：顶部 HUD 停止及主界面停止分别实测进入 CANCELLED，发送按钮恢复；日志 task cancelled by user。最终 APK 再跑同一 3Blue1Brown 搜索/打开视频任务，COMPLETED / 10 steps，实际视频页面与结果报告一致。首轮为 9 步；两轮起始界面不同，不按步数比较性能或成功率。测试结束返回主应用，关闭主机 logcat 观察进程。
+- **限制与下一步**：最终模型使用“简介”作为证据，文本出处校验通过但语义证据较弱，必须继续加强目标核验；目前只有特定 B 站任务实测，未验证所有应用。截图视觉理解、会话落盘与任务恢复仍未实现，优先补齐这三项。UIAutomator 运行中抑制无障碍的测试干扰已在 TESTING 中记录。
+- **提交**：本轮未提交；分支 master，HEAD 4de95e4。

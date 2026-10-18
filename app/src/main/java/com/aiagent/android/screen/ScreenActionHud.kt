@@ -60,6 +60,7 @@ object ScreenActionHud {
             }
 
             dismissInternal()
+            currentOnStop = onStopClicked
             createAndAttachWorkingView(context, initialText)
         }
     }

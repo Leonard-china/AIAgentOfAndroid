@@ -29,6 +29,9 @@ class AIAgentApplication : Application() {
     lateinit var orchestrator: AgentOrchestrator
         private set
 
+    lateinit var conversation: com.aiagent.android.ai.AgentConversation
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -41,6 +44,7 @@ class AIAgentApplication : Application() {
         similarPhotoEngine = SimilarPhotoEngine(this)
         trashExecutor = TrashOperationExecutor(this, dbHelper)
         orchestrator = AgentOrchestrator(this, storageEngine, mediaScanner, duplicateEngine, similarPhotoEngine, vault)
+        conversation = com.aiagent.android.ai.AgentConversation(orchestrator)
     }
 
     companion object {

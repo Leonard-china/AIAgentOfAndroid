@@ -92,9 +92,10 @@ class FloatingAssistantService : Service() {
     private lateinit var lifecycleOwner: FloatingLifecycleOwner
     private lateinit var notificationManager: NotificationManager
 
-    private val messages = mutableStateListOf<AiMessage>()
-    private val activeSteps = mutableStateListOf<TaskStep>()
-    private var isProcessing by mutableStateOf(false)
+    private val conversation get() = AIAgentApplication.instance.conversation
+    private val messages get() = conversation.messages
+    private val activeSteps get() = conversation.activeSteps
+    private val isProcessing get() = conversation.isProcessing
 
     // Current State
     private var currentState by mutableStateOf(FloatingState.EXPANDED)
@@ -118,7 +119,6 @@ class FloatingAssistantService : Service() {
 
         createNotificationChannel()
         initLayoutParams()
-        initMessages()
         initView()
 
         // startForegroundService 要求 5 秒内进入前台；同时保证悬浮窗与“随时唤出”
@@ -258,15 +258,6 @@ class FloatingAssistantService : Service() {
         }
 
         updateNotification(newState)
-    }
-
-    private fun initMessages() {
-        messages.add(
-            AiMessage(
-                sender = "ASSISTANT",
-                content = "👋 您好！AI 助手悬浮窗已开启。您可以在手机任意应用界面向我发送指令，例如：“帮我点设置”、“向下滑动”、“查看当前屏幕”或“排查重复照片”。"
-            )
-        )
     }
 
     private fun initView() {
@@ -426,19 +417,10 @@ class FloatingAssistantService : Service() {
         windowManager.addView(composeView, expandedLayoutParams)
     }
 
-    private fun startNewChat() {
-        messages.clear()
-        activeSteps.clear()
-        isProcessing = false
-        messages.add(
-            AiMessage(
-                sender = "ASSISTANT",
-                content = "✨ 已为您开启新对话！之前的会话上下文与历史任务已重置。您可以随时对我说出新的文件管理或屏幕操作需求。"
-            )
-        )
-    }
+    private fun startNewChat() { conversation.newChat() }
 
     private fun handleUserPrompt(prompt: String) {
+        if (isProcessing || prompt.isBlank()) return
         val trimmed = prompt.trim().removePrefix("➕").removePrefix("📌").removePrefix("👁️").trim()
         when (trimmed) {
             "开新对话", "新建对话", "清空对话", "重新开始" -> {
@@ -459,33 +441,8 @@ class FloatingAssistantService : Service() {
             }
         }
 
-        val currentHistory = messages.toList()
-        messages.add(AiMessage(sender = "USER", content = prompt))
-        isProcessing = true
-        activeSteps.clear()
-
-        serviceScope.launch {
-            try {
-                val responseMsg = AIAgentApplication.instance.orchestrator.processGoal(
-                    userPrompt = prompt,
-                    history = currentHistory,
-                    onStepUpdated = { steps ->
-                        activeSteps.clear()
-                        activeSteps.addAll(steps)
-                    }
-                )
-                messages.add(responseMsg)
-            } catch (e: Exception) {
-                messages.add(
-                    AiMessage(
-                        sender = "ASSISTANT",
-                        content = "执行出现异常: ${e.message}"
-                    )
-                )
-            } finally {
-                isProcessing = false
-            }
-        }
+        updateFloatingState(FloatingState.HIDDEN)
+        conversation.submit(prompt)
     }
 
     private fun executeActionPlan(plan: ActionPlan) {
@@ -820,20 +777,18 @@ class FloatingAssistantService : Service() {
                             FilledIconButton(
                                 onClick = {
                                     val trimmed = inputText.trim()
-                                    if (trimmed.isNotBlank() && !isProcessing) {
+                                    if (isProcessing) {
+                                        AIAgentApplication.instance.orchestrator.cancelCurrentTask()
+                                    } else if (trimmed.isNotBlank()) {
                                         inputText = ""
                                         handleUserPrompt(trimmed)
                                     }
                                 },
-                                enabled = inputText.isNotBlank() && !isProcessing,
+                                enabled = inputText.isNotBlank() || isProcessing,
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 if (isProcessing) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
+                                    Icon(Icons.Default.Stop, contentDescription = "停止任务", modifier = Modifier.size(16.dp))
                                 } else {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Send,

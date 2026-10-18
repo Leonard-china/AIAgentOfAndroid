@@ -121,7 +121,8 @@ data class AiMessage(
     val content: String,
     var plan: ActionPlan? = null,
     var taskSteps: List<TaskStep> = emptyList(),
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val taskStatus: String = "ANSWERED"
 )
 
 fun formatBytes(bytes: Long): String {

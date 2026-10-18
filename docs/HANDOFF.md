@@ -1,123 +1,79 @@
-# 开发交接备忘录 (HANDOFF.md)
+# 开发交接备忘录
 
----
+更新时间：2026-10-18 12:08:18（Asia/Shanghai / UTC+08:00）
 
-## 1. 当前实施阶段与整体概览
+## 当前阶段与目标
 
-- **当前阶段**：v1.0.0 已发布；2026-10-18 11:35 完成体验优化与缺陷闭环（**完成标志一触即关**、**结构化任务完成报告横幅**、**免权限第三方就地交流卡片**、**UP 主空间自动播放自愈闭环**），**全量单元测试（21个）与正式 Release APK 构建及真机部署已全部验证通过**。
-- **当前状态**：
-  1. **完成标志随手关闭**：重构 HUD 全周期交互架构，运行态与完成态均提供独立物理 `[✕]` 按钮，一戳瞬间移除浮窗，彻底根除“完成标志关不掉”的顽疾；
-  2. **任务完成结构化报告**：任务结束后顶部横幅展示清晰任务明细与类型图标，提供一键 `[💬 交流]` 与 `[✕]` 关闭；
-  3. **免权限就地交流对话卡片**：基于 `TYPE_ACCESSIBILITY_OVERLAY` 特权，在任意第三方应用（如 B 站）无需额外悬浮窗授权即可在底部弹出交流面板，支持快捷操作气泡与文字输入框；
-  4. **UP 主空间二级自愈播放**：在搜索进入 UP 主个人主页时，自动识别并点击“播放全部”蓝色按钮或首个投稿视频，达成真正的端到端播放；
-  5. **长时记忆与模型升级**：硬件加密记忆库就绪，默认接入 DeepSeek-V3 满血版旗舰模型；
-  6. **真机已部署**：新版 Release APK 已成功全静默部署至荣耀 VKJ-AN00 (Android 16 / MagicOS 10.0, serial: `AXRBUT6520002413`)，无障碍服务与前台服务持续正常运行。
+已完成“手机跨应用任务智能体”第一轮架构纠偏、工作台改版与实机验证。用户优先目标为：**打开应用、搜索内容、继续完成操作**。文件与相册保留为本地原生工具。尚未达到任意应用、任意屏幕都可稳定操作的完整产品阶段。
 
----
+接手先读 AGENTS.md → docs/README.md → 本文件 → PRODUCT.md / ARCHITECTURE.md / TESTING.md。不要沿用旧版本“100%成功”“无已知问题”等结论。
 
-## 2. 三态功能清单
+## 已实现且已验证
 
-### 2.1 已实现且已验证 (Implemented & Verified)
-- [x] **HUD 完成标志物理关闭与全周期随手关闭架构**：
-  - `ScreenActionHud.kt` 无论在运行中还是完成态，均提供右侧 `[✕]` 物理关闭按钮，用户点击即刻 `removeViewImmediate` 移除；
-  - 修复 `dismissInternal` 同步执行机制，杜绝异步延迟清理带来的闪烁与残留；
-  - 真机实测截图验证：点击前横幅清晰展示，点击后立即干净移除，无任何界面遮挡。
-- [x] **任务完成报告横幅与免权限就地交互面板**：
-  - `ScreenActionHud.showCompletion`：以墨黑毛玻璃宽幅横幅呈现任务报告与关键动作；
-  - `ScreenAssistantAccessibilityService.showQuickChatOverlay`：基于无障碍特权 `TYPE_ACCESSIBILITY_OVERLAY` 实现免授权顶层弹窗，提供“🎬 换一个视频”、“⛶ 全屏播放”等快捷胶囊与输入框，在当前页面直接追加新需求。
-- [x] **B 站 UP 主个人主页自动播放与二级自愈闭环**：
-  - `ScreenAssistantAccessibilityService.kt` 新增 `isBilibiliOnUpSpace()` 与 `playVideoFromUpSpace()`；
-  - 误入 UP 主主页后毫秒级探测并点击“播放全部”胶囊或首个视频卡片，配合防早停机制确保视频播放达成。
-- [x] **基于 Android KeyStore 硬件级的专属长时记忆系统 (Long-term Memory)**：
-  - `model/Models.kt` 建立 `UserMemoryItem` 领域模型（key, value, label, updatedTime）；
-  - `security/KeyStoreVault.kt` 硬件加密实现 `saveMemory`、`getMemory`、`getAllMemories`、`deleteMemory`、`clearAllMemories`；
-  - `ToolRegistry.kt` 注册工具 18 (`save_long_term_memory`) 与工具 19 (`recall_long_term_memory`)；
-  - `AgentOrchestrator.kt` 注入 System Prompt 记忆库与填表铁律，并在离线与在线分支中均可自由存取；
-  - `ui/SettingsScreen.kt` 落地专属长时记忆管理卡片，支持手机号与密码脱敏遮罩、眼睛查看明文、增删与清空；
-  - 单元测试（`OfflineIntentClassifierTest`、`ToolRegistryTest`）全量通过。
-- [x] **视频搜索与播放端到端闭环自愈 (Search & Playback Closure)**：
-  - `ScreenAssistantAccessibilityService.kt` 新增 `submitSearch`（ACTION_IME_ENTER、顶部搜索按键、联想首项点击与回车手势四重回退）；
-  - `clickFirstVideoCardInSearchResults` 自动识别并点击搜索结果中首个真实视频卡片；
-  - `operate_screen_input` 工具支持智能闭环自愈：提交搜索后自动等待 1.2 秒检测搜索结果并顺手点击首个视频卡片进入播放；
-  - 离线规则 `RECOMMEND_VIDEO` 提取搜索词（如“3blue1brown”、“科普视频”），实现全流程自愈播放闭环。
-- [x] **就地交互完成通知横幅 (Interactive Completion Banner)**：
-  - `ScreenActionHud.kt` 实现 `showCompletionBanner`：采用 `TYPE_ACCESSIBILITY_OVERLAY` 模拟高质感系统通知横幅，集成“🤖 AI 智能管家”、“说明内容”及“💬 继续交流”快捷按钮；
-  - 点击横幅或胶囊立即在当前页面（如 B 站）就地唤出桌面悬浮窗继续对话，无需按 Home 切回主 App；8.5 秒无操作自动平滑淡出。
-- [x] **物理真机部署与静默安装**：
-  - 成功跑通 MagicOS 10.0 (Android 16) 下免指纹全静默部署：`adb push` 到 `/data/local/tmp/app-release.apk` 后执行 `pm install -r -t -g`；
-  - 荣耀 VKJ-AN00 (Android 16, serial: `AXRBUT6520002413`) 部署成功（`Success`）。
-- [x] **全量单元测试与打包**：
-  - `.\gradlew.bat testDebugUnitTest` 6 个测试类、21 个单元测试用例全量通过（0 失败）；
-  - `.\gradlew.bat assembleRelease` 耗时 32s 构建成功，产出 45.9 MB 正式签名 APK。
-- [x] **大模型端侧对接与硬件 Keystore**：
-  - 适配阿里云百炼 DashScope（`qwen-plus`），实测网络连通性 HTTP 200；
-  - 真机实测自然语言多轮规划与 Function Calling 工具调用成功率 100%。
-- [x] **受控屏幕操作与连点器辅助能力 (Accessibility & Gesture)**：
-  - 模拟手势点击与滑动、全局按键（`BACK`、`HOME`、`RECENTS`、`NOTIFICATIONS`）；
-  - 纯文本屏幕提取 `inspect_current_screen`；
-  - 开屏广告毫秒级本地秒跳 `autoDismissSplashAdOrDialog`；
-  - 防误触「我的」并自动切回推荐首页 `ensureBilibiliHomePage`；
-  - 深度屏幕树分析（16 层，50 元素）与视频播放详情页状态自动识别。
-- [x] **桌面全局悬浮窗防遮挡与四态伸缩架构 (Floating Assistant Window)**：
-  - 展开态、贴边极窄把手（14dp）、灵动胶囊、完全隐身四态智能流转；
-  - 系统通知栏常驻卡片控制，荣耀真机触控与伸缩闭环 100% 成功。
-- [x] **存储与媒体真实分析工具层**：
-  - `StorageEngine` 闪存实际占用分项、`MediaScannerEngine` 大视频检索、`DuplicateDetectionEngine` SHA-256 分块查重、`SimilarPhotoEngine` 感知哈希聚类、`TrashOperationExecutor` 系统回收站流转与反向还原。
+### 本地构建与回归
 
-### 2.2 已实现但未验证 (Implemented but Unverified)
-- [ ] **全量相册感知哈希大图集压力测试**：
-  - 需在用户全量上千张相册背景并发运行时验证内存与耗时边界。
+- 最终代码执行 `.\gradlew.bat testDebugUnitTest assembleDebug assembleRelease`，BUILD SUCCESSFUL，24 秒。
+- 8 个测试类、29 项，0 failures / 0 errors / 0 skipped；新增 7 项执行循环回归、1 项真实本机 HTTP 不完整响应取消测试，原有 21 项保留。
+- 执行循环覆盖提前结束拦截、伪造/过期快照与证据拒绝、失败动作不能完成、重复无进展限制、需接手立即停批次、取消传播、动作预算。HTTP 测试观察取消后 socket 关闭。
+- Release 已由 apksigner verify 验证成功，文件大小 46,023,277 字节，SHA-256：`2db2c2cfcdf4ac41c6578c8c84b6e01b4ab3b46d439d5880c5e0e9f748a30dc8`。
+- 最终 Release 经 ADB push + `pm install -r -t` 覆盖安装，返回 Success；未清数据或导出密钥。
 
-### 2.3 尚未实现 (Not Implemented)
-- [ ] **待用户提供生成的图标**：
-  - 待用户通过 GPT 生成专业 App 图标后，导入 Android `res/mipmap` 替换启动器默认图标；
-- [ ] **扩展增量功能**：
-  - 基于端侧 NPU/TFLite 的图片本地 Embedding 语义搜图；
-  - SAF 自选目录全盘树形重命名与跨卷物理移动；
-  - 历史多会话列表与对话归档切换。
+### 真机结果（仅限以下实际场景）
 
----
+- 荣耀 VKJ-AN00 / Android 16 / MagicOS 10.0 / serial `AXRBUT6520002413`，设备配置模型 qwen-plus。
+- “在哔哩哔哩搜索 3Blue1Brown，打开一个数学视频”：首轮 9 步自主完成，进入官方《AI 未能解决的最后一道 IMO 真题》详情页；相隔截图中的视频画面持续变化。助手报告引用真实标题，切回主界面保留 9 个步骤。最终 APK 覆盖安装后再次从已有视频页面出发，以 10 步完成同一目标，日志 `task finished status=COMPLETED steps=10`；结果与视频页面已保存为 final-report.xml/png、final-task.png。第二轮 finish_task 的原文证据为“简介”，虽来源真实但语义证明较弱，进一步说明仍需补强独立目标核验。
+- 运行中顶部 HUD 停止与主界面停止分别实测：点击后均显示“已停止任务”，发送按钮恢复，无自动离线重放；日志出现 task cancelled by user。修复了旧 HUD 的停止回调在 show 清理时被清空的问题。
+- 主界面、悬浮窗共用应用级 AgentConversation 历史和忙碌状态；悬浮窗打开可见相同记录；执行前隐藏悬浮聊天防遮挡，启动浮窗不再注入额外欢迎消息。
+- 最后补充服务连接 StateFlow，真机覆盖安装后首页会自动显示“屏幕已连接”，避免重连晚于 onResume 时提示永久滞后。
 
-## 3. 当前外部阻塞项与应对方案
+### 实现要点
 
-- **外部阻塞项**：无。物理真机（荣耀 VKJ-AN00 / `AXRBUT6520002413`）在线且已安装最新 Release APK。
-- **应对策略**：已通过 ADB 完成最新 Release 覆盖安装，无障碍服务保持运行中，可直接在设备上测试。
-- **设备状态**：荣耀 VKJ-AN00 (Android 16 / MagicOS 10.0 / `AXRBUT6520002413`) 在线，无障碍服务 `ScreenAssistantAccessibilityService` 激活。
-- **模型状态**：DashScope Qwen KeyStore 加密存储，模型 `qwen-plus` 随时可调用。
+- `AgentLoop` 通用循环最多 24 轮、48 工具调用，外层 5 分钟；动作后回读真实屏幕，finish_task 区分完成/阻塞/需接手。普通文字回复与耗尽预算不会被当作屏幕任务完成。
+- `ScreenSession` 当前快照持有真实节点；点击/输入绑定 snapshot_id 与 node_id，复核窗口、包名、可见性、启用状态、文本和边界。输入不再顺带点击视频；删除仍经原生文件确认流程。
+- 屏幕操作同时受应用开关与无障碍连接控制，离线屏幕命令也遵守开关。密码字段脱敏；屏幕文字会发给用户配置的模型，设置页已如实说明；不再自动向系统提示注入整个记忆库。
+- 停止取消当前协程与 OkHttp 请求；互斥保护多入口；三入口共享进程内历史。主导航为助手、工具、设置；存储/相册/审计归入工具。
 
----
+## 已实现但未充分验证
 
-## 4. 关键构建与部署命令
+- 通用多应用流程只完成 B 站专项；微信、浏览器、系统设置、商用应用等需要逐一建立任务矩阵。不可从一个成功任务推导通用成功率。
+- finish_task 校验的是最新屏幕原文的出处和时效；**语义目标仍由模型判断**，不是独立的目标正确性验证器，也不能单凭标题证明播放。
+- 过期引用与多候选拒绝已实现；复杂窗口/键盘/分屏、快速滚动、第三方自绘 UI 仍需更多真机覆盖。
+- 顶部停止和 HTTP 取消已测；已派发给 Android 的单次动作无法自动撤销，不能承诺点击停止后撤销已发生动作。
+- 大相册哈希并发、权限降级、回收站等本轮未重做实机回归，不沿用旧文档的“全量通过”断言。
+
+## 尚未实现
+
+1. 截图视觉理解与图像坐标定位；Canvas/游戏/受保护画面等可能无可读节点，目前需报告阻塞。
+2. 多会话磁盘持久化、任务恢复、前台任务生命周期保障；当前会话仅进程内保存，进程结束会丢失。
+3. 稳定的跨应用任务验收矩阵、目标独立语义核验与更清楚的接手/继续交互。
+4. 千张相册压力测试、SAF 目录移动/重命名、本地语义搜图、分类相册/EXIF 预览等旧规划。
+
+## 测试注意事项与当前外部条件
+
+- 手机和已配置模型在本轮测试时可用；不等于以后永久在线，接手时重新检查 ADB / 模型连接。
+- **运行中不要执行普通 uiautomator dump**：本轮它临时抑制无障碍服务，导致一个测试任务以 NEEDS_USER 结束后服务重连。运行中只用 screencap 和日志；若用 instrumentation，须使用 FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES。
+- 主动切回本应用也会改变模型操作目标，不能把这种干扰后的失败算作自然场景失败样本。
+- `onInterrupt` 是反馈中断而非解绑；当前已改为仅记录反馈中断，连接状态在 onServiceConnected / onUnbind / onDestroy 更新。
+- 本地证据在被 Git 忽略的 artifacts/2026-10-18-review/，含 XML、截图和 verification.json；不会把个人屏幕内容提交到 Git。
+
+## 下一步最优先任务
+
+1. 加入由用户明确开启的截图视觉观察，结合可替换的视觉模型解决无障碍不可读画面，并记录屏幕内容上传范围与开关。
+2. 增加浏览器/系统设置两个只读任务的端到端验收；先把失败反馈、接手和继续做可靠。
+3. 会话落盘与历史切换、进程恢复，避免手机后台回收后丢任务。
+
+## 构建与部署命令
 
 ```powershell
-# 1. 运行本地单元测试
-.\gradlew.bat testDebugUnitTest
-
-# 2. 构建正式 Release APK 安装包
-.\gradlew.bat assembleRelease
-
-# 3. 检查设备在线情况
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices
-
-# 4. 一键安装 Release 包至目标手机
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" -s AXRBUT6520002413 push app\build\outputs\apk\release\app-release.apk /data/local/tmp/app-release.apk
-& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" -s AXRBUT6520002413 shell pm install -r -t -g /data/local/tmp/app-release.apk
-
-# 5. 启动主页面
+.\gradlew.bat testDebugUnitTest assembleDebug assembleRelease
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices -l
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" -s AXRBUT6520002413 push app\build\outputs\apk\release\app-release.apk /data/local/tmp/aiagent-final.apk
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" -s AXRBUT6520002413 shell pm install -r -t /data/local/tmp/aiagent-final.apk
 & "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" -s AXRBUT6520002413 shell am start -n com.aiagent.android/.ui.MainActivity
 ```
 
----
+## 分支与提交
 
-## 5. 当前代码与提交信息
-
-- **当前分支**：`master`
-- **最新提交 Commit**：`f6f239f`
-- **最新功能**：
-  1. 完成标志随手关闭：全周期物理 `[✕]` 按钮，一触即关，杜绝视觉残留与阻挡；
-  2. 任务完成结构化报告：通知横幅展示分类图标与任务简报；
-  3. 免权限就地交互面板：基于 `TYPE_ACCESSIBILITY_OVERLAY` 在第三方界面弹出快捷气泡与输入框直接追加任务；
-  4. B 站 UP 主空间自动检测与播放闭环：误入主页自动识别并点击“播放全部”蓝色胶囊按钮；
-  5. 满血旗舰模型升级：预置 DeepSeek-V3/R1 与 Qwen-Max 矩阵。
-- **验证结果**：单元测试 21/21 全量通过，Release 构建成功，已静默覆盖安装至荣耀物理机 (VKJ-AN00, Android 16 / MagicOS 10.0)。
-
+- 分支：master；本轮开始及当前 HEAD：4de95e4（此前功能提交 f6f239f）。
+- 本轮改动尚未提交。不要把旧 HEAD 写成本轮代码提交。
+- CHANGELOG 历史前缀已与 Git HEAD 内容对比确认保留，仅追加新记录。

@@ -1,6 +1,6 @@
 # 文档导航中心 (Documentation Index)
 
-欢迎查阅 **Android AI 文件与相册管理助手** 项目文档体系。为了帮助开发者与 Agent 快速进入角色，本文档提供了系统化的阅读顺序与目录索引。
+欢迎查阅 **Android 手机任务智能体** 项目文档体系。当前优先跨应用操作（打开应用、搜索内容、完成操作），原生文件与相册能力作为工具保留。为了帮助开发者与 Agent 快速进入角色，本文档提供了系统化的阅读顺序与目录索引。
 
 ---
 
@@ -47,3 +47,5 @@ flowchart TD
 - **基准适配机型**：荣耀 VKJ-AN00（MagicOS 10.0 / Android 16 / 12GB RAM / 256GB ROM）
 - **开发语言**：Kotlin 2.2+ / Jetpack Compose / Coroutines & Flow
 - **架构基础**：Material 3 + Jetpack Compose + 协程 + 原生 `SQLiteOpenHelper`（未引入 Room/WorkManager，详见 `docs/ARCHITECTURE.md` §6 实现现状校准）
+
+> 2026-10-18：当前屏幕执行为无障碍控件树驱动，尚无截图视觉理解。新的 AgentLoop / ScreenSession / AgentConversation 及真实验证结论见 ARCHITECTURE.md §7 与 HANDOFF.md，旧历史记录不代表当前通用能力已通过验收。

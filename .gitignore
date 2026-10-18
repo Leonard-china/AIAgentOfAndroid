@@ -14,3 +14,6 @@ local.properties
 *.aab
 *.keystore
 *.jks
+
+# Local device screenshots and verification output
+/artifacts/

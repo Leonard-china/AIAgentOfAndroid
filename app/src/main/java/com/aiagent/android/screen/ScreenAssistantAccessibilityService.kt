@@ -38,9 +38,11 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "ScreenAssistant"
 
-        @Volatile
-        var isConnected: Boolean = false
-            private set
+        private val connection = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val connectionState: kotlinx.coroutines.flow.StateFlow<Boolean> = connection
+        var isConnected: Boolean
+            get() = connection.value
+            private set(value) { connection.value = value }
 
         internal var instance: ScreenAssistantAccessibilityService? = null
         private val emergencyStop = AtomicBoolean(false)
@@ -48,21 +50,6 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         /** 系统级破坏性确认弹窗的文本特征，用于硬性拦截自动代点。 */
         private val destructiveKeywords = listOf(
             "移至最近删除", "永久删除", "清除全部", "格式化", "清空", "删除", "卸载"
-        )
-
-        /** 开屏广告与常见阻碍弹窗关键词（本地快速秒跳） */
-        private val splashSkipKeywords = listOf(
-            "跳过广告", "跳过", "关闭广告", "Skip", "我知道了", "以后再说", "残忍拒绝"
-        )
-
-        /** 视频播放状态特征（用于目标达成校验） */
-        private val videoPlaybackKeywords = listOf(
-            "弹幕", "清晰度", "倍速", "投屏", "点赞", "投币", "分享", "全屏", "评论"
-        )
-
-        /** B站「我的」个人中心特征词 */
-        private val bilibiliMyPageKeywords = listOf(
-            "我的大会员", "创作中心", "离线缓存", "我的收藏", "稍后再看", "我的服务"
         )
 
         fun isServiceRunning(): Boolean = isConnected && instance != null
@@ -113,384 +100,6 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         }
 
         fun isEmergencyStopped(): Boolean = emergencyStop.get()
-
-        /**
-         * 本地毫秒级开屏广告/更新弹窗自动快速秒跳。
-         * 在启动应用后在本地以 100ms 频率快速扫描当前屏幕（无需经过大模型云端往返），
-         * 一旦探测到开屏跳过按钮，0.1 秒内执行原生点击。
-         */
-        fun autoDismissSplashAdOrDialog(maxWaitMs: Long = 2600L, pollIntervalMs: Long = 100L): Boolean {
-            if (emergencyStop.get()) return false
-            val svc = instance ?: return false
-            val startTime = System.currentTimeMillis()
-            Log.d(TAG, "Starting local autoDismissSplashAdOrDialog (timeout: ${maxWaitMs}ms)...")
-
-            while (System.currentTimeMillis() - startTime < maxWaitMs) {
-                if (emergencyStop.get()) return false
-                val root = svc.rootInActiveWindow
-                if (root != null) {
-                    val targetNode = findSplashSkipNode(root)
-                    if (targetNode != null) {
-                        val text = targetNode.text?.toString() ?: targetNode.contentDescription?.toString()
-                        Log.i(TAG, "Found splash skip target: \"$text\", clicking immediately...")
-                        var clicked = svc.clickNodeOrParent(targetNode)
-                        if (!clicked) {
-                            val bounds = Rect()
-                            targetNode.getBoundsInScreen(bounds)
-                            if (bounds.width() > 0 && bounds.height() > 0) {
-                                clicked = clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                            }
-                        }
-                        if (clicked) {
-                            Log.i(TAG, "Successfully auto-dismissed splash ad: \"$text\" in ${System.currentTimeMillis() - startTime}ms")
-                            return true
-                        }
-                    }
-                }
-                try {
-                    Thread.sleep(pollIntervalMs)
-                } catch (_: InterruptedException) {
-                    break
-                }
-            }
-            Log.d(TAG, "autoDismissSplashAdOrDialog finished without hitting skip button.")
-            return false
-        }
-
-        private fun findSplashSkipNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-            val queue = ArrayDeque<AccessibilityNodeInfo>()
-            queue.add(root)
-            var count = 0
-            while (queue.isNotEmpty() && count < 100) {
-                val node = queue.removeFirst()
-                count++
-                val text = node.text?.toString()?.trim()
-                val desc = node.contentDescription?.toString()?.trim()
-                val label = if (!text.isNullOrEmpty()) text else desc
-                if (label != null && label.length in 1..20) {
-                    // Check if it matches any skip pattern
-                    if (splashSkipKeywords.any { p -> label.contains(p, ignoreCase = true) }) {
-                        if (!destructiveKeywords.any { label.contains(it) }) {
-                            return node
-                        }
-                    }
-                }
-                for (i in 0 until node.childCount) {
-                    val child = node.getChild(i)
-                    if (child != null) queue.add(child)
-                }
-            }
-            return null
-        }
-
-        /**
-         * 检查当前屏幕是否正在播放视频（基于全屏、清晰度、弹幕等特征）
-         */
-        fun isVideoPlaying(): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            var matchCount = 0
-
-            fun walk(node: AccessibilityNodeInfo?, depth: Int) {
-                if (node == null || depth > 12 || matchCount >= 2) return
-                val text = node.text?.toString() ?: node.contentDescription?.toString()
-                if (text != null && videoPlaybackKeywords.any { text.contains(it) }) {
-                    matchCount++
-                }
-                for (i in 0 until node.childCount) {
-                    walk(node.getChild(i), depth + 1)
-                }
-            }
-            walk(root, 0)
-            return matchCount >= 2
-        }
-
-        /**
-         * 检测当前是否误入了 B站的「我的」个人中心页面
-         */
-        fun isBilibiliOnMyPage(): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            var matchCount = 0
-
-            fun walk(node: AccessibilityNodeInfo?, depth: Int) {
-                if (node == null || depth > 10 || matchCount >= 2) return
-                val text = node.text?.toString() ?: node.contentDescription?.toString()
-                if (text != null && bilibiliMyPageKeywords.any { text.contains(it) }) {
-                    matchCount++
-                }
-                for (i in 0 until node.childCount) {
-                    walk(node.getChild(i), depth + 1)
-                }
-            }
-            walk(root, 0)
-            return matchCount >= 2
-        }
-
-        /**
-         * 若当前在「我的」个人中心，自动点按「首页」导航标签切回推荐视频流
-         */
-        fun ensureBilibiliHomePage(): Boolean {
-            if (isBilibiliOnMyPage()) {
-                Log.i(TAG, "Detected on 'My' page, auto clicking '首页' to return to home feed...")
-                return findAndClick("首页")
-            }
-            return true
-        }
-
-        /**
-         * 检测当前是否在 B站 UP主个人空间（如 3Blue1Brown 的空间主页/投稿页）
-         */
-        fun isBilibiliOnUpSpace(): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            if (root.findAccessibilityNodeInfosByText("播放全部").isNotEmpty()) return true
-            val hasSubmission = root.findAccessibilityNodeInfosByText("投稿").isNotEmpty()
-            val hasSpaceSignals = root.findAccessibilityNodeInfosByText("主页").isNotEmpty() ||
-                    root.findAccessibilityNodeInfosByText("充电").isNotEmpty() ||
-                    root.findAccessibilityNodeInfosByText("关注").isNotEmpty() ||
-                    root.findAccessibilityNodeInfosByText("已关注").isNotEmpty() ||
-                    root.findAccessibilityNodeInfosByText("动态").isNotEmpty()
-            return hasSubmission && hasSpaceSignals
-        }
-
-        /**
-         * 在 UP主个人空间内自动点击“播放全部”或第一条投稿视频进入播放详情页
-         */
-        fun playVideoFromUpSpace(): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            val dm = svc.resources.displayMetrics
-            val bounds = Rect()
-
-            // 1. 优先寻找“播放全部”按钮并点击
-            val playAllNodes = root.findAccessibilityNodeInfosByText("播放全部")
-            if (playAllNodes.isNotEmpty()) {
-                val node = playAllNodes[0]
-                node.getBoundsInScreen(bounds)
-                if (svc.clickNodeOrParent(node) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())) {
-                    Log.i(TAG, "playVideoFromUpSpace: Clicked '播放全部' @(${bounds.centerX()}, ${bounds.centerY()})")
-                    return true
-                }
-            }
-
-            // 2. 寻找投稿列表中的第一个视频标题节点
-            fun findFirstVideo(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
-                if (node == null || depth > 16) return null
-                val text = node.text?.toString() ?: node.contentDescription?.toString()
-                if (text != null && text.length in 6..120) {
-                    node.getBoundsInScreen(bounds)
-                    if (bounds.top > dm.heightPixels * 0.45f && bounds.width() > dm.widthPixels * 0.35f) {
-                        val isExcluded = text.contains("播放全部") || text.contains("最新发布") || text.contains("筛选") ||
-                                text.contains("置顶") || text.contains("充电") || text.contains("关注") ||
-                                text.contains("主页") || text.contains("动态") || text.contains("投稿") || text.contains("小店")
-                        if (!isExcluded) {
-                            return node
-                        }
-                    }
-                }
-                for (i in 0 until node.childCount) {
-                    val child = node.getChild(i)
-                    val found = findFirstVideo(child, depth + 1)
-                    if (found != null) return found
-                }
-                return null
-            }
-
-            val vid = findFirstVideo(root, 0)
-            if (vid != null) {
-                vid.getBoundsInScreen(bounds)
-                val ok = svc.clickNodeOrParent(vid) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                if (ok) {
-                    Log.i(TAG, "playVideoFromUpSpace: Clicked video '${vid.text}' @(${bounds.centerX()}, ${bounds.centerY()})")
-                    return true
-                }
-            }
-
-            // 3. 坐标保底：UP主空间投稿列表首个视频项 (width * 0.5f, height * 0.72f)
-            val coordOk = clickAt(dm.widthPixels * 0.5f, dm.heightPixels * 0.72f)
-            Log.i(TAG, "playVideoFromUpSpace coordinate tap fallback @(0.5f, 0.72f) -> $coordOk")
-            return coordOk
-        }
-
-        /**
-         * 在当前界面的活跃输入框中输入文本，并可选提交（点击搜索或回车）
-         */
-        fun inputText(text: String, submit: Boolean = true): Boolean {
-            if (emergencyStop.get()) return false
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            Log.d(TAG, "inputText: \"$text\", submit=$submit")
-
-            // 1. 尝试找到已经获取焦点的输入框
-            var targetNode = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            if (targetNode == null || (!targetNode.isEditable && targetNode.className?.contains("EditText") != true)) {
-                // 2. 遍历查找第一个 EditText 或可编辑控件
-                targetNode = findFirstEditableNode(root)
-            }
-
-            if (targetNode != null) {
-                targetNode.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                val args = Bundle().apply {
-                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-                }
-                val setSuccess = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                Log.i(TAG, "ACTION_SET_TEXT result: $setSuccess")
-                if (setSuccess) {
-                    if (submit) {
-                        try {
-                            Thread.sleep(500L)
-                        } catch (_: InterruptedException) {}
-                        val searchClicked = submitSearch(text)
-                        Log.i(TAG, "submitSearch result: $searchClicked")
-                    }
-                    return true
-                }
-            }
-            Log.w(TAG, "No editable node found to input text: \"$text\"")
-            return false
-        }
-
-        /**
-         * 强化版搜索提交：综合考虑顶栏搜索按钮、搜索候选联想词项、软键盘回车键
-         */
-        fun submitSearch(keyword: String = ""): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            val dm = svc.resources.displayMetrics
-            val width = dm.widthPixels.toFloat()
-            val height = dm.heightPixels.toFloat()
-
-            // 1. 尝试对当前焦点输入框执行 ACTION_IME_ENTER (API 30+)
-            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            if (focused != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (focused.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
-                    Log.i(TAG, "submitSearch via ACTION_IME_ENTER succeeded")
-                    return true
-                }
-            }
-
-            // 2. 查找屏幕顶部的“搜索”按钮（Y < 16% 高度，X > 65% 屏幕宽度）
-            val bounds = Rect()
-            val searchNodes = root.findAccessibilityNodeInfosByText("搜索")
-            for (node in searchNodes) {
-                node.getBoundsInScreen(bounds)
-                if (bounds.top < height * 0.16f && bounds.right > width * 0.65f) {
-                    if (svc.clickNodeOrParent(node) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())) {
-                        Log.i(TAG, "submitSearch via top-right search button succeeded @(${bounds.centerX()}, ${bounds.centerY()})")
-                        return true
-                    }
-                }
-            }
-
-            // 3. 点击联想词列表中的首个候选词（如 "3Blue1Brown" 或包含关键词的项）
-            if (keyword.isNotEmpty()) {
-                val suggestionNodes = root.findAccessibilityNodeInfosByText(keyword)
-                for (node in suggestionNodes) {
-                    node.getBoundsInScreen(bounds)
-                    if (bounds.top in (height * 0.08f).toInt()..(height * 0.45f).toInt()) {
-                        if (svc.clickNodeOrParent(node) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())) {
-                            Log.i(TAG, "submitSearch via suggestion item succeeded: ${node.text} @(${bounds.centerX()}, ${bounds.centerY()})")
-                            return true
-                        }
-                    }
-                }
-            }
-
-            // 4. 坐标回退保底：
-            // 4a. 顶栏右侧“搜索”固定位置点击
-            val topSearchOk = clickAt(width * 0.92f, height * 0.055f)
-            if (topSearchOk) {
-                Log.i(TAG, "submitSearch fallback tap on top-right search coord succeeded")
-                return true
-            }
-
-            // 4b. 软键盘右下角“搜索”按键位置点击
-            val imeSearchOk = clickAt(width * 0.90f, height * 0.94f)
-            Log.i(TAG, "submitSearch fallback tap on keyboard search key -> $imeSearchOk")
-            return imeSearchOk
-        }
-
-        /**
-         * 无论在搜索结果页还是在 UP主个人空间页，都精准定位并点击视频卡片进入播放闭环
-         */
-        fun clickFirstVideoCardInSearchResults(): Boolean {
-            val svc = instance ?: return false
-            val root = svc.rootInActiveWindow ?: return false
-            val dm = svc.resources.displayMetrics
-            val width = dm.widthPixels.toFloat()
-            val height = dm.heightPixels.toFloat()
-            val bounds = Rect()
-
-            // 0. 特征检测 A：如果已经进入了 UP主个人空间，直接播放视频
-            if (isBilibiliOnUpSpace()) {
-                val ok = playVideoFromUpSpace()
-                if (ok) {
-                    try { Thread.sleep(900L) } catch (_: InterruptedException) {}
-                    return true
-                }
-            }
-
-            // 1. 在通用搜索结果列表中寻找真正的视频卡片（严格过滤掉 UP主名片，UP主名片包含粉丝、充电、认证、关注等）
-            fun findSearchVideoNode(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
-                if (node == null || depth > 16) return null
-                val text = node.text?.toString() ?: node.contentDescription?.toString()
-                if (text != null && text.length in 6..100) {
-                    node.getBoundsInScreen(bounds)
-                    if (bounds.width() > width * 0.35f && bounds.top in (height * 0.10f).toInt()..(height * 0.85f).toInt()) {
-                        val isUpCard = text.contains("粉丝") || text.contains("充电") || text.contains("认证") ||
-                                text.contains("关注") || text.contains("综合") || text.contains("番剧") ||
-                                text.contains("筛选") || text.contains("会员购") || text.contains("动态") ||
-                                text.contains("小店")
-                        if (!isUpCard) {
-                            return node
-                        }
-                    }
-                }
-                for (i in 0 until node.childCount) {
-                    val child = node.getChild(i)
-                    val found = findSearchVideoNode(child, depth + 1)
-                    if (found != null) return found
-                }
-                return null
-            }
-
-            val videoNode = findSearchVideoNode(root, 0)
-            if (videoNode != null) {
-                videoNode.getBoundsInScreen(bounds)
-                val clicked = svc.clickNodeOrParent(videoNode) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                Log.i(TAG, "clickFirstVideoCardInSearchResults found and clicked: ${videoNode.text ?: videoNode.contentDescription} -> $clicked")
-            } else {
-                // 坐标保底：点击搜索结果第 1 个视频项 (width * 0.5f, height * 0.42f) 避开顶部的 UP主名片
-                val coordOk = clickAt(width * 0.5f, height * 0.42f)
-                Log.i(TAG, "clickFirstVideoCard coordinate tap fallback @(0.5f, 0.42f) -> $coordOk")
-            }
-
-            // 等待页面过渡渲染
-            try { Thread.sleep(1000L) } catch (_: InterruptedException) {}
-
-            // 自愈校验：若点击误入了 UP主个人空间（例如点中了 UP主名片），继续执行空间内播放
-            if (isBilibiliOnUpSpace()) {
-                Log.i(TAG, "Landed on UP space after click, auto continuing playVideoFromUpSpace()...")
-                playVideoFromUpSpace()
-                try { Thread.sleep(900L) } catch (_: InterruptedException) {}
-            }
-
-            return isVideoPlaying() || isBilibiliOnUpSpace()
-        }
-
-        private fun findFirstEditableNode(node: AccessibilityNodeInfo, depth: Int = 0): AccessibilityNodeInfo? {
-            if (depth > 12) return null
-            if (node.isEditable || node.className?.contains("EditText") == true) {
-                return node
-            }
-            for (i in 0 until node.childCount) {
-                val child = node.getChild(i) ?: continue
-                val found = findFirstEditableNode(child, depth + 1)
-                if (found != null) return found
-            }
-            return null
-        }
 
         fun clickAt(x: Float, y: Float, durationMs: Long = 50L): Boolean {
             if (emergencyStop.get()) return false
@@ -634,81 +243,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
 
         fun performGlobalBack(): Boolean = performGlobal("BACK")
 
-        fun inspectScreenSummary(): String {
-            val svc = instance ?: return "无障碍辅助服务未连接"
-            val root = svc.rootInActiveWindow ?: return "当前未检测到活跃窗口"
-
-            val items = mutableListOf<String>()
-            val bounds = Rect()
-
-            // 检查当前应用界面全局状态
-            val isPlaying = isVideoPlaying()
-            val isOnMyPage = isBilibiliOnMyPage()
-
-            val navTabs = setOf("首页", "关注", "动态", "会员购", "我的")
-
-            fun traverse(node: AccessibilityNodeInfo?, depth: Int) {
-                if (node == null || depth > 16 || items.size >= 50) return
-                val text = node.text?.toString()?.trim()
-                val desc = node.contentDescription?.toString()?.trim()
-                val label = when {
-                    !text.isNullOrEmpty() -> text
-                    !desc.isNullOrEmpty() -> desc
-                    else -> null
-                }
-
-                if (label != null && label.length in 1..60) {
-                    node.getBoundsInScreen(bounds)
-                    if (bounds.width() > 0 && bounds.height() > 0) {
-                        val centerX = bounds.centerX()
-                        val centerY = bounds.centerY()
-
-                        val entry = when {
-                            navTabs.contains(label) -> {
-                                if (label == "我的") {
-                                    "[底栏导航: \"$label\" @($centerX,$centerY) - ⚠️此为个人中心，非视频卡片，切勿误点]"
-                                } else {
-                                    "[底栏导航: \"$label\" @($centerX,$centerY) - 提示:可点击返回首页推荐流]"
-                                }
-                            }
-                            label.contains("搜索") -> "[搜索入口: \"$label\" @($centerX,$centerY)]"
-                            node.isClickable && label.length >= 4 -> "[推荐视频卡片: \"$label\" @($centerX,$centerY)]"
-                            node.isClickable -> "[可点击控件: \"$label\" @($centerX,$centerY)]"
-                            node.className?.contains("Button") == true -> "[按钮: \"$label\" @($centerX,$centerY)]"
-                            else -> "[文本: \"$label\" @($centerX,$centerY)]"
-                        }
-                        items.add(entry)
-                    }
-                }
-
-                for (i in 0 until node.childCount) {
-                    val child = node.getChild(i)
-                    traverse(child, depth + 1)
-                }
-            }
-
-            traverse(root, 0)
-
-            val builder = StringBuilder()
-            val isUpSpace = isBilibiliOnUpSpace()
-            if (isPlaying) {
-                builder.append("🎬【状态判定】：检测到屏幕正处于视频播放详情页！已达成视频播放目标！\n\n")
-            } else if (isUpSpace) {
-                builder.append("📺【状态判定】：当前已进入 UP 主个人空间主页！请调用 operate_screen_click 点击「播放全部」或者点击首个投稿视频卡片进入播放！\n\n")
-            } else if (isOnMyPage) {
-                builder.append("⚠️【状态判定】：当前停留在「我的」个人中心界面，并非视频播放页。请点击「首页」返回推荐流或点击搜索框寻找视频！\n\n")
-            }
-
-            if (items.isEmpty()) {
-                builder.append("当前屏幕未检测到显著文本或交互元素")
-            } else {
-                builder.append("屏幕可见元素（共 ${items.size} 项，纯文本摘要）：\n")
-                builder.append(items.joinToString("\n"))
-            }
-
-            Log.d(TAG, "inspectScreenSummary generated (${items.size} items, isPlaying=$isPlaying, isOnMyPage=$isOnMyPage)")
-            return builder.toString()
-        }
+        fun inspectScreenSummary(): String = ScreenSession().observe().toString()
 
         private var quickChatView: View? = null
         private var quickChatWm: WindowManager? = null
@@ -840,10 +375,9 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
                 }
 
                 val quickActions = listOf(
-                    "🎬 换一个视频",
-                    "⛶ 全屏播放",
-                    "⏸ 暂停/继续",
-                    "⬅ 返回推荐首页",
+                    "查看当前屏幕",
+                    "向上滑动",
+                    "返回上一页",
                     "📱 授权完整悬浮窗"
                 )
 
@@ -976,22 +510,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         }
 
         private fun executeDefaultFollowupGoal(context: Context, prompt: String) {
-            ScreenActionHud.show(context, "正在执行: \"$prompt\"...")
-            CoroutineScope(Dispatchers.Main).launch {
-                try {
-                    val orchestrator = AIAgentApplication.instance.orchestrator
-                    orchestrator.processGoal(
-                        userPrompt = prompt,
-                        onStepUpdated = { steps ->
-                            steps.lastOrNull()?.let { lastStep ->
-                                ScreenActionHud.update(lastStep.detail.ifBlank { lastStep.title })
-                            }
-                        }
-                    )
-                } catch (e: Exception) {
-                    ScreenActionHud.failed("执行出错: ${e.message}")
-                }
-            }
+            AIAgentApplication.instance.conversation.submit(prompt)
         }
 
         private fun dpToPx(context: Context, dp: Float): Float {
@@ -1012,9 +531,14 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+        // Android interrupts feedback here; the service is still bound and usable.
+        Log.i(TAG, "Accessibility feedback interrupted; service remains connected.")
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
         isConnected = false
         instance = null
-        Log.w(TAG, "ScreenAssistantAccessibilityService interrupted.")
+        return super.onUnbind(intent)
     }
 
     override fun onDestroy() {

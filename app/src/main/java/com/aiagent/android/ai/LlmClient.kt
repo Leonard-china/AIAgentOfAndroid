@@ -5,6 +5,13 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
+import java.io.IOException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -97,39 +104,53 @@ class LlmClient(
             .post(payload.toString().toRequestBody(jsonMediaType))
             .build()
 
-        val response = client.newCall(request).execute()
-        response.use { resp ->
-            if (!resp.isSuccessful) {
-                val error = resp.body?.string() ?: ""
-                throw IllegalStateException("API 请求失败 (${resp.code}): $error")
-            }
-            val bodyString = resp.body?.string() ?: throw IllegalStateException("空响应体")
-            val root = gson.fromJson(bodyString, JsonObject::class.java)
-            val choices = root.getAsJsonArray("choices")
-            if (choices == null || choices.size() == 0) {
-                return@withContext LlmResponse(content = "模型未返回选项")
-            }
+        val bodyString = awaitBody(request)
+        val root = gson.fromJson(bodyString, JsonObject::class.java)
+        val choices = root.getAsJsonArray("choices")
+        if (choices == null || choices.size() == 0) {
+            throw IllegalStateException("模型未返回选项")
+        }
 
-            val firstChoice = choices[0].asJsonObject
-            val message = firstChoice.getAsJsonObject("message")
-            val content = if (message.has("content") && !message.get("content").isJsonNull) {
-                message.get("content").asString
-            } else null
+        val firstChoice = choices[0].asJsonObject
+        val message = firstChoice.getAsJsonObject("message")
+        val content = if (message.has("content") && !message.get("content").isJsonNull) {
+            message.get("content").asString
+        } else null
 
-            val toolCalls = mutableListOf<ToolCall>()
-            if (message.has("tool_calls") && message.get("tool_calls").isJsonArray) {
-                val array = message.getAsJsonArray("tool_calls")
-                for (elem in array) {
-                    val tcObj = elem.asJsonObject
-                    val id = tcObj.get("id").asString
-                    val fnObj = tcObj.getAsJsonObject("function")
-                    val fnName = fnObj.get("name").asString
-                    val args = fnObj.get("arguments").asString
-                    toolCalls.add(ToolCall(id, fnName, args))
+        val toolCalls = mutableListOf<ToolCall>()
+        if (message.has("tool_calls") && message.get("tool_calls").isJsonArray) {
+            val array = message.getAsJsonArray("tool_calls")
+            for (elem in array) {
+                val tcObj = elem.asJsonObject
+                val id = tcObj.get("id").asString
+                val fnObj = tcObj.getAsJsonObject("function")
+                val fnName = fnObj.get("name").asString
+                val args = fnObj.get("arguments").asString
+                toolCalls.add(ToolCall(id, fnName, args))
+            }
+        }
+
+        LlmResponse(content = content, toolCalls = toolCalls, rawMessage = message)
+    }
+
+    private suspend fun awaitBody(request: Request): String = suspendCancellableCoroutine { continuation ->
+        val call = client.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val body = response.use {
+                        if (!it.isSuccessful) throw IOException("模型服务返回 HTTP ${it.code}")
+                        it.body?.string() ?: throw IOException("模型返回空响应体")
+                    }
+                    if (continuation.isActive) continuation.resume(body)
+                } catch (e: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
                 }
             }
-
-            LlmResponse(content = content, toolCalls = toolCalls, rawMessage = message)
-        }
+        })
     }
 }

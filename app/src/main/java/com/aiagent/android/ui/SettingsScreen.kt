@@ -53,7 +53,7 @@ fun SettingsScreen(
         } else true
     }
 
-    val isAccessibilityActive = ScreenAssistantAccessibilityService.isServiceRunning()
+    val isAccessibilityActive by ScreenAssistantAccessibilityService.connectionState.collectAsState()
 
     LazyColumn(
         modifier = modifier
@@ -310,7 +310,7 @@ fun SettingsScreen(
                     }
 
                     Text(
-                        text = "本模块独立且默认关闭。仅在用户发起任务时协助调起系统存储页面并辅助查看。绝不代替用户自动点击系统级删除确认弹窗。",
+                        text = "开启后，助手会按你的任务读取当前应用的可访问界面文字，并发送给所配置的模型规划点击、输入和滑动。密码字段会隐藏；系统删除确认由你手动处理。自绘界面暂不支持。",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)

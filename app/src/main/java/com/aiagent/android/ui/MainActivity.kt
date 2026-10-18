@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -32,7 +33,7 @@ import kotlinx.coroutines.launch
 
 enum class AppTab(val title: String, val icon: ImageVector) {
     ASSISTANT("助手", Icons.AutoMirrored.Filled.Chat),
-    STORAGE("存储", Icons.Default.PieChart),
+    STORAGE("工具", Icons.Default.GridView),
     MEDIA("相册与文件", Icons.Default.PhotoLibrary),
     AUDIT("操作记录", Icons.Default.History),
     SETTINGS("设置", Icons.Default.Settings)
@@ -47,9 +48,10 @@ class MainActivity : ComponentActivity() {
     private var pendingRestoreRecord: AuditRecord? = null
 
     // UI States
-    private val messages = mutableStateListOf<AiMessage>()
-    private val activeSteps = mutableStateListOf<TaskStep>()
-    private var isProcessing by mutableStateOf(false)
+    private val conversation get() = AIAgentApplication.instance.conversation
+    private val messages get() = conversation.messages
+    private val activeSteps get() = conversation.activeSteps
+    private val isProcessing get() = conversation.isProcessing
     private var storageStat by mutableStateOf<StorageStat?>(null)
     private var isStorageLoading by mutableStateOf(false)
     private val mediaItems = mutableStateListOf<MediaItem>()
@@ -64,16 +66,6 @@ class MainActivity : ComponentActivity() {
         initLaunchers()
         checkAndRequestPermissions()
 
-        // Initial welcome message
-        if (messages.isEmpty()) {
-            messages.add(
-                AiMessage(
-                    sender = "ASSISTANT",
-                    content = "您好！我是您的 Android AI 文件与相册管理助手。我可以为您分析存储空间、查找超大视频、精准排查重复照片并整理相册。请问有什么可以帮您？"
-                )
-            )
-        }
-
         refreshData()
 
         // 安全说明：不再接受外部 Intent 传入的 "prompt" 指令。
@@ -81,15 +73,38 @@ class MainActivity : ComponentActivity() {
         // prompt，将允许第三方应用借用户之手触发 AI 工具与屏幕自动化，故彻底移除该入口。
 
         setContent {
-            AIAgentTheme {
-
+            val dark = androidx.compose.foundation.isSystemInDarkTheme()
+            SideEffect {
+                androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+            AIAgentTheme(darkTheme = dark) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
+                    topBar = {
+                        if (currentTab in listOf(AppTab.STORAGE, AppTab.MEDIA, AppTab.AUDIT)) {
+                            androidx.compose.foundation.layout.Row(Modifier.padding(top = 28.dp)) {
+                                listOf(AppTab.STORAGE to "存储分析", AppTab.MEDIA to "相册与文件", AppTab.AUDIT to "操作记录").forEach { (tab, label) ->
+                                    TextButton(onClick = {
+                                        currentTab = tab
+                                        when (tab) {
+                                            AppTab.STORAGE -> loadStorageData()
+                                            AppTab.MEDIA -> loadMediaData()
+                                            AppTab.AUDIT -> loadAuditData()
+                                            else -> Unit
+                                        }
+                                    }) { Text(label) }
+                                }
+                            }
+                        }
+                    },
                     bottomBar = {
                         NavigationBar {
-                            AppTab.values().forEach { tab ->
+                            listOf(AppTab.ASSISTANT, AppTab.STORAGE, AppTab.SETTINGS).forEach { tab ->
                                 NavigationBarItem(
-                                    selected = currentTab == tab,
+                                    selected = currentTab == tab || (tab == AppTab.STORAGE && currentTab in listOf(AppTab.MEDIA, AppTab.AUDIT)),
                                     onClick = {
                                         currentTab = tab
                                         if (tab == AppTab.STORAGE) loadStorageData()
@@ -110,6 +125,12 @@ class MainActivity : ComponentActivity() {
                             isProcessing = isProcessing,
                             onSendMessage = { prompt -> handleUserPrompt(prompt) },
                             onNewChat = { startNewChat() },
+                            onStopTask = { AIAgentApplication.instance.orchestrator.cancelCurrentTask() },
+                            onOpenSettings = { currentTab = AppTab.SETTINGS },
+                            screenConnected = com.aiagent.android.screen.ScreenAssistantAccessibilityService.connectionState.collectAsState().value && AIAgentApplication.instance.vault.isScreenAssistantEnabled(),
+                            modelLabel = AIAgentApplication.instance.vault.let {
+                                if (!it.hasApiKey() || it.isOfflinePreferred()) "离线工具" else it.getModelName()
+                            },
                             onConfirmPlan = { plan -> executeActionPlan(plan) },
                             onCancelPlan = { plan -> cancelActionPlan(plan) },
                             modifier = Modifier.padding(innerPadding)
@@ -348,52 +369,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startNewChat() {
-        messages.clear()
-        activeSteps.clear()
-        isProcessing = false
-        messages.add(
-            AiMessage(
-                sender = "ASSISTANT",
-                content = "✨ 已为您开启新对话！之前的会话上下文与历史任务已重置。您可以随时向我咨询手机存储、查找大文件、清理相册或协助操作屏幕。"
-            )
-        )
-    }
+    private fun startNewChat() { conversation.newChat() }
 
     private fun handleUserPrompt(prompt: String) {
+        if (isProcessing || prompt.isBlank()) return
         val trimmed = prompt.trim().removePrefix("➕").trim()
         if (trimmed == "开新对话" || trimmed == "新建对话" || trimmed == "清空对话" || trimmed == "重新开始") {
             startNewChat()
             return
         }
 
-        val currentHistory = messages.toList()
-        messages.add(AiMessage(sender = "USER", content = prompt))
-        isProcessing = true
-        activeSteps.clear()
-
-        lifecycleScope.launch {
-            try {
-                val responseMsg = AIAgentApplication.instance.orchestrator.processGoal(
-                    userPrompt = prompt,
-                    history = currentHistory,
-                    onStepUpdated = { steps ->
-                        activeSteps.clear()
-                        activeSteps.addAll(steps)
-                    }
-                )
-                messages.add(responseMsg)
-            } catch (e: Exception) {
-                messages.add(
-                    AiMessage(
-                        sender = "ASSISTANT",
-                        content = "执行过程中遇到错误: ${e.message}"
-                    )
-                )
-            } finally {
-                isProcessing = false
-            }
-        }
+        conversation.submit(prompt)
     }
 
     private fun executeActionPlan(plan: ActionPlan) {

@@ -11,7 +11,7 @@ class ToolRegistryTest {
     @Test
     fun testToolRegistryDeclaresAllCoreTools() {
         val tools = ToolRegistry.getToolsSchema()
-        assertEquals(19, tools.size())
+        assertEquals(20, tools.size())
 
         val toolNames = mutableSetOf<String>()
         for (elem in tools) {
@@ -38,6 +38,7 @@ class ToolRegistryTest {
         assertTrue(toolNames.contains("operate_screen_input"))
         assertTrue(toolNames.contains("save_long_term_memory"))
         assertTrue(toolNames.contains("recall_long_term_memory"))
+        assertTrue(toolNames.contains("finish_task"))
     }
 
     @Test
