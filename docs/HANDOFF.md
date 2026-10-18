@@ -132,5 +132,5 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start
 ## 5. 当前代码与提交信息
 
 - **当前分支**：`master`
-- **最新提交 Commit**：`5b659c1`
-- **最新代码状态**：本轮 P1/P2 修复已提交至本地 `master` 分支，单元测试与 Debug/Release 构建已通过，待同步至远端并执行真机回归。
+- **最新提交 Commit**：`a2e6b2a`
+- **最新代码状态**：已集成原生 launch_app 工具组件与受限制设置直达指引，单元测试（18个用例）与 Release 构建均已通过，待部署真机实测。
