@@ -27,8 +27,8 @@ class KeyStoreVault(private val context: Context) {
         private const val KEY_SCREEN_ASSISTANT_ENABLED = "screen_assistant_enabled"
         private const val KEY_OFFLINE_PREFERRED = "offline_preferred"
 
-        const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
-        const val DEFAULT_MODEL = "gpt-4o-mini"
+        const val DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+        const val DEFAULT_MODEL = "deepseek-chat"
     }
 
     private val prefs: SharedPreferences =

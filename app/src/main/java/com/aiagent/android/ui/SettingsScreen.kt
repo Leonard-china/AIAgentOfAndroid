@@ -97,34 +97,44 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         FilterChip(
-                            selected = baseUrl.contains("aliyuncs") || modelName.contains("qwen"),
-                            onClick = {
-                                baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                                modelName = "qwen-plus"
-                                vault.saveBaseUrl(baseUrl)
-                                vault.saveModelName(modelName)
-                            },
-                            label = { Text("通义千问 (Qwen)", fontSize = 11.sp) }
-                        )
-                        FilterChip(
-                            selected = baseUrl.contains("deepseek"),
+                            selected = modelName == "deepseek-chat",
                             onClick = {
                                 baseUrl = "https://api.deepseek.com/v1"
                                 modelName = "deepseek-chat"
                                 vault.saveBaseUrl(baseUrl)
                                 vault.saveModelName(modelName)
                             },
-                            label = { Text("DeepSeek", fontSize = 11.sp) }
+                            label = { Text("DeepSeek V3 (首选推荐)", fontSize = 11.sp) }
                         )
                         FilterChip(
-                            selected = baseUrl.contains("openai.com"),
+                            selected = modelName == "deepseek-reasoner",
                             onClick = {
-                                baseUrl = "https://api.openai.com/v1"
-                                modelName = "gpt-4o-mini"
+                                baseUrl = "https://api.deepseek.com/v1"
+                                modelName = "deepseek-reasoner"
                                 vault.saveBaseUrl(baseUrl)
                                 vault.saveModelName(modelName)
                             },
-                            label = { Text("OpenAI", fontSize = 11.sp) }
+                            label = { Text("DeepSeek R1", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = modelName.contains("qwen"),
+                            onClick = {
+                                baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                                modelName = "qwen-max"
+                                vault.saveBaseUrl(baseUrl)
+                                vault.saveModelName(modelName)
+                            },
+                            label = { Text("千问 Max", fontSize = 11.sp) }
+                        )
+                        FilterChip(
+                            selected = modelName == "gpt-4o",
+                            onClick = {
+                                baseUrl = "https://api.openai.com/v1"
+                                modelName = "gpt-4o"
+                                vault.saveBaseUrl(baseUrl)
+                                vault.saveModelName(modelName)
+                            },
+                            label = { Text("GPT-4o", fontSize = 11.sp) }
                         )
                     }
 

@@ -591,6 +591,41 @@
 - **Git 提交标识**：`cb27514`
 ---
 
+## [2026-10-18 11:05:00] - 根治大模型草率早停缺陷、全面升级旗舰模型预置矩阵 (DeepSeek-V3/R1/Qwen-Max)
+
+- **变更摘要**：
+  - **根治大模型注意力草率早停缺陷 (Early-Stopping Reflex Prevention)**：
+    - 针对大模型在执行复合屏幕任务（如搜视频、看视频）时，经常在仅执行了文字输入后就自作聪明返回文本结束调用的“早停”毛病；
+    - 在 `AgentOrchestrator.kt` 的 `processGoal` 循环中加入强行阻断与督促机制：当 `response.toolCalls.isEmpty()` 时，硬性校验当前视频是否已真正开始播放；
+    - 若尚未播放，首先由本地无障碍服务自动自愈触发首卡点击；若仍未播放，在 `messages` 中强行注入警告督促消息（`【目标未达成警告】：当前视频尚未开始播放！严禁停留在搜索结果或文字输入状态！请立即调用 operate_screen_click 点击首个相关视频卡片进入播放！`），逼迫大模型必须调用工具完成播放闭环，彻底根除“打了字就走人”的早停缺陷！
+  - **淘汰轻量廉价小模型，全面接入最新满血旗舰大模型**：
+    - 此前预置默认的 `gpt-4o-mini` 属于蒸馏小模型，在 19 个复杂工具链和长 Prompt 下极易注意力衰减和幻觉早停；
+    - 在 `ui/SettingsScreen.kt` 将模型预置芯片全面升级为 2026 最新顶尖旗舰：
+      1. **DeepSeek V3 (671B 满血版)**（`deepseek-chat`，国内首选推荐，极速响应，Tool Calling 遵循度极高）；
+      2. **DeepSeek R1 (深度思考)**（`deepseek-reasoner`，复杂逻辑多步长思维链）；
+      3. **通义千问 Max**（`qwen-max`，阿里最强旗舰，替代旧版 plus）；
+      4. **OpenAI GPT-4o**（`gpt-4o`，官方满血旗舰，替代 mini）；
+    - 在 `security/KeyStoreVault.kt` 中将默认模型升级为 `deepseek-chat` (DeepSeek V3) 与 `https://api.deepseek.com/v1`。
+- **修改原因**：
+  - 响应用户对模型体验不佳的严肃反馈，深度剖析大模型多轮往返早停与模型选型过旧/过弱的底层根因，从系统架构与模型选型双重维度根治问题。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/main/java/com/aiagent/android/ui/SettingsScreen.kt`
+  - `app/src/main/java/com/aiagent/android/security/KeyStoreVault.kt`
+  - `docs/CHANGELOG.md`
+  - `docs/HANDOFF.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. Release APK 构建：`.\gradlew.bat assembleRelease`；
+    3. 真机静默安装：`adb push` + `pm install -r -t -g` 至荣耀 VKJ-AN00 (Android 16, serial: `AXRBUT6520002413`)。
+  - 真实结果：
+    1. 单元测试 21/21 全量通过（0 失败）；
+    2. Release APK 构建成功（耗时 30s，大小 45.9 MB）；
+    3. 真机静默覆盖安装成功（`Success`）。
+- **Git 提交标识**：待提交（本轮变更后提交）
+---
+
 
 
 

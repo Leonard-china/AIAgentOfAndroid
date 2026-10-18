@@ -172,6 +172,33 @@ class AgentOrchestrator(
                 }
 
                 if (response.toolCalls.isEmpty()) {
+                    // 防早停校验：若用户目标是看视频/搜视频，但视频尚未真正进入播放，且未达到最大轮数
+                    val isVideoTask = OfflineIntentClassifier.classify(userPrompt) == OfflineIntent.RECOMMEND_VIDEO ||
+                            userPrompt.contains("视频") || userPrompt.contains("B站") || userPrompt.contains("b站") || userPrompt.contains("3blue1brown")
+                    val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying()
+
+                    if (isVideoTask && !isPlaying && currentTurn < maxTurns) {
+                        // 本地尝试自愈：检测并点击首个搜索卡片
+                        val cardClicked = ScreenAssistantAccessibilityService.clickFirstVideoCardInSearchResults()
+                        if (cardClicked) {
+                            delay(1200L)
+                            if (ScreenAssistantAccessibilityService.isVideoPlaying()) {
+                                finalReplyContent = "🎬 已为您在哔哩哔哩搜索并自动点击进入首个视频播放详情页！祝您观影愉快！😊"
+                                break
+                            }
+                        }
+
+                        // 强指令注入督促大模型继续推进，严禁草率结束
+                        response.rawMessage?.let { messages.add(it) }
+                        val superviseMsg = JsonObject().apply {
+                            addProperty("role", "user")
+                            addProperty("content", "【目标未达成警告】：当前视频尚未开始播放！严禁停留在文字输入或候选页面！用户的明确意图是观看视频。请立即调用 operate_screen_click 点击首个相关视频卡片进入播放！")
+                        }
+                        messages.add(superviseMsg)
+                        ScreenActionHud.update("🎬 正在督促 AI 点击首个视频卡片播放...")
+                        continue
+                    }
+
                     finalReplyContent = response.content
                     break
                 }
