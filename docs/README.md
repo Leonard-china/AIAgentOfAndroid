@@ -46,4 +46,4 @@ flowchart TD
 - **目标平台**：Android 11 (API 30) ~ Android 16 (API 36)
 - **基准适配机型**：荣耀 VKJ-AN00（MagicOS 10.0 / Android 16 / 12GB RAM / 256GB ROM）
 - **开发语言**：Kotlin 2.2+ / Jetpack Compose / Coroutines & Flow
-- **架构基础**：Material 3 + Jetpack Compose + MVVM + Room + WorkManager
+- **架构基础**：Material 3 + Jetpack Compose + 协程 + 原生 `SQLiteOpenHelper`（未引入 Room/WorkManager，详见 `docs/ARCHITECTURE.md` §6 实现现状校准）

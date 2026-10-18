@@ -53,9 +53,11 @@ graph TD
   - 纯声明式 UI，状态驱动单向数据流（UDF）。
   - 统一深色模式支持与现代中文字体排版。
   - 任务闭环状态呈现：区分【正在检索】、【生成方案】、【等待用户确认】、【执行中】、【校验结果】。
-  - 所有耗时操作带有取消按钮与真实的百分比/文件计数进度条。
+  - 规划目标：所有耗时操作带有取消按钮与真实的百分比/文件计数进度条；**当前实现仅显示实时任务步骤卡片，取消按钮与百分比进度条尚未落地**（见 §6 校准说明）。
 - **桌面全局悬浮窗架构 (`FloatingAssistantService` & `FloatingAssistantManager`)**：
   - 基于 Android `WindowManager`（`TYPE_APPLICATION_OVERLAY`）与 `SYSTEM_ALERT_WINDOW` 权限，支持跨任意第三方应用与手机桌面随时调出；
+  - 服务以 `startForeground` 前台化（`FOREGROUND_SERVICE_SPECIAL_USE`），并为通知申请 `POST_NOTIFICATIONS` 运行时权限，保证 Android 13+ 上“通知栏随时唤出”可靠可用；
+  - `FloatingAssistantService` 声明为 `exported=false`，仅允许本应用（含本应用创建的 PendingIntent）启动，收敛外部攻击面；
   - 采用自定义 `FloatingLifecycleOwner`（集成 `LifecycleRegistry`、`ViewModelStore` 与 `SavedStateRegistryController`），让全功能 Jetpack Compose 可以在后台 Service 中稳定无缝运行；
   - **双态自适应切换**：
     1. **折叠态（悬浮球）**：采用 `FLAG_NOT_FOCUSABLE`，支持全屏边缘拖拽与吸附，不干扰下层应用触摸；点击立刻平滑展开；
@@ -68,7 +70,7 @@ graph TD
   - `ActionPlanCard`：在执行破坏性操作前，冻结当前拟操作的对象列表（URI/ID、路径、大小、操作类型），向用户渲染确认卡片。
 - **状态安全铁律**：
   - 严禁执行模型凭空捏造的虚假路径；所有执行目标必须经过本地已扫描对象的唯一真实引用（MediaStore ID 或 DocumentUri）校验。
-  - 任务设置步数上限（默认 $\le 8$ 步）、重试次数上限（$\le 2$ 次）及超时中断机制。
+  - 任务设置步数上限（当前实现：LLM 工具循环最多 4 轮，见 `AgentOrchestrator.maxTurns`）、重试次数上限（规划目标 ≤ 2 次，尚未单独实现）及超时中断机制（OkHttp 连接/读取超时）。
 
 ### 2.3 可校验工具层 (Verifiable Tools & Executors)
 提供明确的结构化输入与输出，杜绝黑盒执行：
@@ -88,17 +90,16 @@ graph TD
    - 支持连点器手势模式：基于 `dispatchGesture` 模拟毫秒级单点点击 (`clickAt(x, y)`) 与平滑方向滑动 (`swipeDirection(direction)`)。
    - 支持全局系统动作派发：返回 (`BACK`)、回到桌面 (`HOME`)、多任务列表 (`RECENTS`)、通知栏 (`NOTIFICATIONS`)。
    - 提供轻量纯文本屏幕提取 (`inspect_current_screen`)：以纯文本形式提取可见可交互元素与中心坐标，杜绝截屏传输，极大节省 Token 开销。
-   - 安全铁律约束：坚决拦截针对系统级删除/清空/格式化等破坏性弹窗的自动代点。
+   - 安全铁律约束：坚决拦截针对系统级删除/清空/格式化等破坏性弹窗的自动代点。当前实现通过 `isDestructiveSystemDialogActive()` 检测“系统包 + 破坏性文案”并同时拦截文字点击与坐标点击；仅在本应用自身界面才放行，避免误伤第三方应用。
 5. **Token 经济与隐私保护协议 (Token Economy & Privacy Protocol)**：
    - 严禁向模型回传海量相册列表或原始图片 Base64/二进制数据。
    - 全盘扫描、流式哈希与相似度聚合完全在端侧本地离线完成，回传大模型的数据严格保持轻量紧凑（数量封顶并剔除无用冗余字段）。
    - 提供精准的单文件详细元数据查询工具 (`query_file_detail`)，仅在用户明确需要了解某一特定文件时单次按需调取。
 
 ### 2.4 数据访问与底层适配层 (Data & Adapters)
-1. **Room 本地持久化**：
-   - `MediaIndexEntity`：本地媒体与文件缓存索引，加速即时搜索与查重。
-   - `TaskStateEntity`：记录多步任务的持久化状态，支持应用异常退出后状态恢复。
-   - `AuditLogEntity`：操作记录，记录操作时间、操作类型、影响文件明细、预计释放大小、执行状态（成功/失败/已恢复）。
+1. **本地持久化（当前实现：SQLiteOpenHelper；Room 为后续规划）**：
+   - 当前 `AppDatabaseHelper` 使用原生 `SQLiteOpenHelper` 维护 `audit_records` 与 `media_cache` 两张表，并未引入 Room；
+   - 规划中的 Room 实体（`MediaIndexEntity` / `TaskStateEntity` / `AuditLogEntity`）尚未落地，本节旧描述已按实际实现校正。
 2. **安全密钥保护 (`KeyStoreVault`)**：
    - 用户填写的自定义模型 API Key，必须使用基于 Android KeyStore 硬件后端的 AES-256-GCM 算法进行加解密。
    - 严禁将明文密钥写入源码、SharedPreferences、普通文件、日志或 Git 仓库。
@@ -153,9 +154,34 @@ stateDiagram-v2
 - **Build Tools**：36.0.0
 - **Gradle**：9.5.0
 - **Android Gradle Plugin (AGP)**：9.3.1
-- **Kotlin**：2.2.10 / 2.3.20 (配合 Kotlin Compose Compiler)
-- **Jetpack Compose BOM**：2026.02.01 (提供 Material 3、Navigation Compose、Icons Extended)
-- **Room**：2.6.1 / 2.7.0-alpha
-- **Coroutines & Flow**：1.10.x
+- **Kotlin**：2.2.10（`gradle/libs.versions.toml`）
+- **Jetpack Compose BOM**：2026.02.01（Material 3 + Icons Extended；**未引入 Navigation Compose**）
+- **协程**：kotlinx-coroutines 1.9.0
 - **OkHttp**：4.12.0 (网络通信与 LLM API 交互)
-- **Security Crypto**：`androidx.security:security-crypto:1.1.0-alpha06` 或原生 KeyStore 封装
+- **Gson**：2.11.0（工具 Schema / 审计记录序列化）
+- **本地存储**：原生 `SQLiteOpenHelper`（**未引入 Room**）
+- **安全**：原生 Android KeyStore（AES-256-GCM 封装；**未引入 androidx.security-crypto**）
+
+---
+
+## 6. 实现现状校准与关键决策记录（2026-10-18）
+
+为避免继续把“规划”写成“完成”，本节明确记录当前代码与早期架构草案的差异及本轮决策：
+
+1. **组件命名校准**：实际组件为 `AgentOrchestrator`、`LlmClient`、`ToolRegistry`、`ActionPlan`；
+   早期文档中的 `TaskOrchestrator` / `ModelPlanner` / `ActionDispatcher` 为规划名，未作为独立类实现。
+2. **本地存储校准**：实际使用 `AppDatabaseHelper`（SQLiteOpenHelper），未引入 Room；
+   任务状态未持久化，进程被杀后对话与任务步骤丢失（“开新对话”同样为内存态重置）。
+3. **状态管理校准**：未引入 ViewModel / StateFlow / Navigation Compose，界面状态由 `MainActivity` 的组合状态直接驱动。
+4. **离线意图分类决策（2026-10-18）**：将离线关键词匹配抽离为 `OfflineIntentClassifier` 纯函数，采用“先具体、后宽泛”的优先级；
+   修复“打开桌面悬浮窗 → HOME”“帮我点设置 → 打开存储设置”“打开无障碍设置 → 打开存储设置”“查看当前屏幕不匹配”等回归，并由 `OfflineIntentClassifierTest` 锁定。
+5. **悬浮窗前台服务决策（2026-10-18）**：`FloatingAssistantService` 改为前台服务并声明 `FOREGROUND_SERVICE_SPECIAL_USE`，
+   同时补齐 `POST_NOTIFICATIONS` 运行时申请；服务 `exported=false`，外部应用不可直接拉起或隐藏悬浮窗。
+6. **屏幕自动化安全决策（2026-10-18）**：新增系统级破坏性弹窗检测，文字点击与坐标点击均受拦截；
+   移除未使用的 `canTakeScreenshot` 能力声明，降低无障碍权限面。
+7. **回收站真实复核决策（2026-10-18）**：系统回收站确认返回后逐项复核目标是否仍在原位置，审计状态区分
+   `SUCCESS_TRASHED` 与 `PARTIAL_TRASHED`，不再仅凭 `RESULT_OK` 宣称成功。
+8. **签名配置决策（2026-10-18）**：Release 签名材料不随仓库分发；密钥库存在时才创建签名配置，
+   口令优先取环境变量/Gradle 属性，缺密钥库时产出未签名 APK 而不是构建失败。
+9. **未实现但旧文档曾暗示的能力**：SAF 目录树移动/重命名、分类相册、缩略图与 EXIF 预览、任务取消按钮与百分比进度条、
+   多会话存档、Room/WorkManager。以上均以 `docs/HANDOFF.md` 的“尚未实现”清单为准。

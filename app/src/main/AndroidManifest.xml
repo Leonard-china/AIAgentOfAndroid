@@ -35,6 +35,10 @@
     <!-- Notification Permission (For persistent summon & hide control) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Foreground Service: keeps the floating assistant + its notification alive on Android 14+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <application
         android:name=".AIAgentApplication"
         android:allowBackup="true"
@@ -70,11 +74,17 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Floating Assistant Window Service (Global desktop bubble & chat) -->
+        <!-- Floating Assistant Window Service (Global desktop bubble & chat).
+             exported=false: only this app (including its notification PendingIntents) may start it. -->
         <service
             android:name=".floating.FloatingAssistantService"
             android:enabled="true"
-            android:exported="true" />
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="floating_assistant_overlay" />
+        </service>
 
     </application>
 

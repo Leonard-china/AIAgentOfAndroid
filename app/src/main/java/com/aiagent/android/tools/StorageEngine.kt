@@ -28,7 +28,9 @@ class StorageEngine(private val context: Context) {
         val audioBytes = queryCategoryBytes(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
 
         val documentsBytes = queryFilesCategoryBytes(
-            selection = "${MediaStore.Files.FileColumns.MIME_TYPE} LIKE ? OR " +
+            // 注意：APK 的 MIME 同样属于 application/*，必须显式排除，否则 APK 会被
+            // “文档与压缩包”和“安装包”两个分类重复计入，导致“系统与其他数据”被低估。
+            selection = "(${MediaStore.Files.FileColumns.MIME_TYPE} LIKE ? OR " +
                     "${MediaStore.Files.FileColumns.DATA} LIKE '%.pdf' OR " +
                     "${MediaStore.Files.FileColumns.DATA} LIKE '%.doc' OR " +
                     "${MediaStore.Files.FileColumns.DATA} LIKE '%.docx' OR " +
@@ -38,8 +40,13 @@ class StorageEngine(private val context: Context) {
                     "${MediaStore.Files.FileColumns.DATA} LIKE '%.pptx' OR " +
                     "${MediaStore.Files.FileColumns.DATA} LIKE '%.txt' OR " +
                     "${MediaStore.Files.FileColumns.DATA} LIKE '%.zip' OR " +
-                    "${MediaStore.Files.FileColumns.DATA} LIKE '%.rar'",
-            selectionArgs = arrayOf("application/%")
+                    "${MediaStore.Files.FileColumns.DATA} LIKE '%.rar') " +
+                    "AND COALESCE(${MediaStore.Files.FileColumns.MIME_TYPE}, '') <> ? " +
+                    "AND COALESCE(${MediaStore.Files.FileColumns.DATA}, '') NOT LIKE '%.apk'",
+            selectionArgs = arrayOf(
+                "application/%",
+                "application/vnd.android.package-archive"
+            )
         )
 
         val apksBytes = queryFilesCategoryBytes(

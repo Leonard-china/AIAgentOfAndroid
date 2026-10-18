@@ -4,8 +4,8 @@
 
 ## 1. 当前实施阶段与整体概览
 
-- **当前阶段**：真机（荣耀 VKJ-AN00 / MagicOS 10.0 / Android 16）端到端全链路闭环验证已**全量通过**。
-- **当前状态**：Qwen 大模型在线规划、Tool Calling（存储查询、大视频检索、重复照片精确排查）、系统回收站安全操作、审计反向还原、感知哈希（dHash）相似照片聚类及 Compose 自动化交互均已在真机上验证闭环。
+- **当前阶段**：v1.0.0 已发布；2026-10-18 08:13 完成一轮 P1/P2 缺陷修复（离线意图回归、回收站清单回写、存储重复计数、通知前台化、屏幕自动化安全加固、签名可移植性），**构建与单元测试已通过**。
+- **当前状态**：Qwen 大模型在线规划、Tool Calling（存储查询、大视频检索、重复照片精确排查）、系统回收站安全操作、审计反向还原、感知哈希（dHash）相似照片聚类及 Compose 自动化交互均已在真机上验证闭环；本轮修复项尚未在真机复验（当前 `adb devices` 无设备在线）。
 
 ---
 
@@ -57,13 +57,28 @@
   - 建立 GitHub 远程仓库：`https://github.com/Leonard-china/AIAgentOfAndroid`；
   - 发布 GitHub Release `v1.0.0` 并挂载正式 Release APK 资产包。
 - [x] **单元测试与打包**：
-  - `.\gradlew.bat testDebugUnitTest` 15 项工具 Schema 与逻辑单元测试全量通过；
-  - `.\gradlew.bat assembleDebug` 全量通过并成功静默覆盖安装到真机；
-  - `.\gradlew.bat assembleRelease` 48 项构建任务成功，生成正式签名 Release 安装包。
+  - `.\gradlew.bat testDebugUnitTest` 6 个测试类、16 个单元测试用例全量通过（0 失败），其中新增 `OfflineIntentClassifierTest` 5 个回归用例；
+  - `.\gradlew.bat assembleDebug` 全量通过；
+  - `.\gradlew.bat assembleRelease` 全量通过，生成正式签名 Release 安装包（本机存在 `release.keystore`）。
+- [x] **P1/P2 缺陷修复（2026-10-18 08:13，构建与单元测试已验证）**：
+  - **离线意图回归修复**：新增 `OfflineIntentClassifier` 纯函数并重排优先级，“打开桌面悬浮窗”不再错误执行 HOME、“帮我点设置”不再打开存储设置页、“打开无障碍设置/查看当前屏幕”可正确匹配；
+  - **回收站清单回写**：目标文件被外部移除时，`MainActivity` 将重新校验后的最新计划回写消息卡片，消除“反复确认旧清单”的死循环；
+  - **存储分类去重**：`StorageEngine` 文档分类排除 APK MIME 与 `.apk` 路径，避免 APK 在“文档”和“安装包”重复计数；
+  - **通知与前台服务**：补充 `POST_NOTIFICATIONS` 运行时申请，`FloatingAssistantService` 使用 `startForeground` + `FOREGROUND_SERVICE_SPECIAL_USE`，保障通知栏“随时唤出”；
+  - **屏幕自动化安全加固**：新增系统级破坏性弹窗检测，坐标/文字点击均硬性拦截；移除未使用的 `canTakeScreenshot` 能力；
+  - **攻击面收敛**：`FloatingAssistantService` 改为 `exported=false`，移除 `MainActivity` 对外部 Intent `prompt` 的执行入口；
+  - **回收站真实复核**：系统确认后逐一复核目标是否真正离开原位置，审计状态区分成功与部分成功；
+  - **签名可移植**：`release.keystore` 缺失时不再阻止 `assembleRelease`，密码优先从环境变量/Gradle 属性读取。
 
 ### 2.2 已实现但未验证 (Implemented but Unverified)
 - [ ] **全量相册感知哈希大图集压力测试**：
   - 已在单元测试及小规模图集中验证 `SimilarPhotoEngine`，需在用户全量上千张相册背景并发运行时验证内存与耗时边界。
+- [ ] **本轮 P1/P2 修复的真机行为验证**（当前 `adb devices` 无设备在线）：
+  - 通知权限弹窗、悬浮窗前台通知与通知栏【唤出/贴边/隐身/关闭】按钮；
+  - 离线指令“打开桌面悬浮窗 / 帮我点设置 / 打开无障碍设置 / 查看当前屏幕”；
+  - 目标文件失效时的清单回写与重新确认；
+  - 系统级删除确认弹窗的自动点击拦截；
+  - 存储页“文档与压缩包 / 安装包 / 系统与其他数据”分类数值一致性。
 
 ### 2.3 尚未实现 (Not Implemented)
 - [ ] **待用户提供生成的图标**：
@@ -77,10 +92,11 @@
 
 ## 3. 当前外部阻塞项与应对方案
 
-- **外部阻塞项**：无重大阻塞。
-- **设备状态**：荣耀 VKJ-AN00 (Android 16) 在线且已安装最新应用版本。
+- **外部阻塞项**：真机验证受阻——2026-10-18 08:13 执行 `adb devices` 显示无设备连接，本轮修复无法完成真机回归。
+- **应对策略**：用户连接荣耀 VKJ-AN00 后，按 §2.2 清单逐项验证；验证通过前，相关修复项保持“已实现但未验证”，不得写入“真机已验证”。
+- **设备状态**：荣耀 VKJ-AN00 (Android 16) 此前在线且已安装历史版本；本轮构建的新 APK 尚未安装。
 - **模型状态**：DashScope Qwen KeyStore 加密存储，模型 `qwen-plus` 随时可调用。
-- **开源发布状态**：已在 GitHub 成功发布开源仓库与 Release v1.0.0。
+- **开源发布状态**：已在 GitHub 成功发布开源仓库与 Release v1.0.0（远端 tag 已确认存在；本地工作区新增修复尚未提交/发布）。
 
 ---
 
@@ -91,6 +107,8 @@
 .\gradlew.bat testDebugUnitTest
 
 # 2. 构建正式 Release APK 安装包
+#    （可选）通过环境变量提供签名口令：AIAGENT_STORE_PASSWORD / AIAGENT_KEY_ALIAS / AIAGENT_KEY_PASSWORD
+#    本机缺少 release.keystore 时 assembleRelease 仍会成功，但产出未签名 APK
 .\gradlew.bat assembleRelease
 
 # 3. 检查设备在线情况
@@ -109,5 +127,5 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start
 ## 5. 当前代码与提交信息
 
 - **当前分支**：`master`
-- **最新提交 Commit**：待提交 (本轮提交)
-- **最新代码状态**：所有代码、资源、配置、根 README 与文档均已就绪并全量构建并在真机及 GitHub 上验证通过。
+- **最新提交 Commit**：`8a21602`（HEAD，远端 `origin/master` 同步）
+- **最新代码状态**：本轮 P1/P2 修复已写入工作区，**尚未提交**；单元测试与 Debug/Release 构建已通过，真机回归待设备连接。

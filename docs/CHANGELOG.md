@@ -359,6 +359,61 @@
   - 后续事项：根据用户意图持续扩展或提供更多安装使用支持。
 - **Git 提交标识**：待提交 (本轮提交)
 
+---
+
+## [2026-10-18 08:15:00] - P1/P2 缺陷修复：离线意图回归、回收站清单回写、存储重复计数、通知前台化与安全加固
+
+- **变更摘要**：
+  - **P1 修复（用户可直接感知）**：
+    1. 新增 `OfflineIntentClassifier` 纯函数并重排离线意图优先级，修复三类回归：
+       - “打开桌面悬浮窗”此前先命中“桌面”分支并错误执行 HOME，现正确进入悬浮窗分支；
+       - “帮我点设置”此前先命中“设置”分支并打开系统存储页，现正确进入屏幕点击分支；
+       - “打开无障碍设置”此前先命中“设置”分支，现正确打开无障碍设置；“查看当前屏幕”此前无法匹配，现已覆盖。
+    2. `MainActivity` 在 `TargetChanged`（目标文件已被外部移除）时，将重新校验后的最新清单回写消息卡片；此前新清单被丢弃，用户反复点击确认仍提交旧清单。
+    3. `StorageEngine` 的文档分类排除 APK MIME 与 `.apk` 路径，修复 APK 在“文档与压缩包”和“安装包”重复计数、导致“系统与其他数据”被低估的问题。
+    4. 补充 `POST_NOTIFICATIONS` 运行时申请；`FloatingAssistantService` 升级为前台服务（`startForeground` + `FOREGROUND_SERVICE_SPECIAL_USE`），修复 Android 13+ 通知不显示、通知栏“随时唤出”失效与服务易被回收的问题。
+  - **P1 安全加固**：
+    5. `ScreenAssistantAccessibilityService` 新增系统级破坏性弹窗检测（仅系统包 + 删除/清空/格式化/卸载等文案生效），文字点击与坐标点击均硬性拦截；扩展破坏性关键词列表，并移除未使用的 `canTakeScreenshot` 能力声明。
+    6. `FloatingAssistantService` 改为 `exported=false`；移除 `MainActivity` 对外部 Intent `prompt` extra 的执行入口，避免第三方应用借用户之手触发 AI 工具与屏幕自动化。
+  - **P2 修复**：
+    7. `TrashOperationExecutor` 在系统回收站确认返回后逐一复核目标文件是否真正离开原位置，审计状态区分 `SUCCESS_TRASHED` / `PARTIAL_TRASHED`，界面在部分成功时给出明确提示（此前注释声称复核但实际未复核）。
+    8. Release 签名配置改为可移植：仅在 `release.keystore` 存在时创建签名配置；口令优先读取 `AIAGENT_STORE_PASSWORD` / `AIAGENT_KEY_ALIAS` / `AIAGENT_KEY_PASSWORD` 或 Gradle 属性；缺失密钥库时 `assembleRelease` 仍可完成并产出未签名 APK。
+    9. 文档与代码实况对齐：修正测试数量、工具数量、签名状态等过期描述；`ARCHITECTURE.md` 新增“实现现状校准”章节，明确当前为 SQLiteOpenHelper 而非 Room，未引入 WorkManager / Navigation / StateFlow，并把未实现能力从规划描述中剥离。
+  - **新增测试**：新增 `OfflineIntentClassifierTest`（5 个用例），锁定悬浮窗 / 点击 / 无障碍 / 查看屏幕 / 存储等易回归指令。
+- **修改原因**：
+  - 用户要求先修复 P1-P3 优先级问题且即将使用手机；优先消除会执行错动作、清单更新失效、通知唤出失效与安全越界的问题，同时纠正文档与代码不一致，避免把计划写成完成。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/ai/OfflineIntentClassifier.kt`（新增）
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/main/java/com/aiagent/android/ui/MainActivity.kt`
+  - `app/src/main/java/com/aiagent/android/tools/StorageEngine.kt`
+  - `app/src/main/java/com/aiagent/android/tools/TrashOperationExecutor.kt`
+  - `app/src/main/java/com/aiagent/android/floating/FloatingAssistantService.kt`
+  - `app/src/main/java/com/aiagent/android/floating/FloatingAssistantManager.kt`
+  - `app/src/main/java/com/aiagent/android/screen/ScreenAssistantAccessibilityService.kt`
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/res/xml/accessibility_service_config.xml`
+  - `app/build.gradle.kts`
+  - `app/src/test/java/com/aiagent/android/OfflineIntentClassifierTest.kt`（新增）
+  - `docs/CHANGELOG.md`、`docs/HANDOFF.md`、`docs/TESTING.md`、`docs/ARCHITECTURE.md`、`docs/README.md`、`docs/PRODUCT.md`、`README.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. Debug + Release 构建：`.\gradlew.bat assembleDebug assembleRelease`；
+    3. Release APK 签名校验：`apksigner verify --print-certs`；
+    4. APK 元数据与权限检查：`aapt2 dump badging`；
+    5. 真机检查：`adb devices`。
+  - 真实结果：
+    1. 单元测试 `BUILD SUCCESSFUL in 37s`：6 个测试类、16 个用例全部通过，0 失败（新增 `OfflineIntentClassifierTest` 5 个用例通过）；
+    2. `assembleDebug assembleRelease` `BUILD SUCCESSFUL in 1m`（84 个任务，24 个实际执行）；Debug APK 64,159,283 字节，Release APK 45,875,701 字节；
+    3. `apksigner verify` 通过：签名证书 `CN=AIAgent`，SHA-256 指纹 `4b2acfc34159f5e3c812a337239030fe3540cef1ca53030728c0592c72760b47`；
+    4. `aapt2 dump badging` 确认 `versionName='1.0.0'`、`targetSdkVersion:'36'`，且新 APK 已包含 `POST_NOTIFICATIONS`、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_SPECIAL_USE` 权限；
+    5. `adb devices` 输出为空，**本轮未执行真机安装与端到端验证**；相关行为保持“已实现但未验证”，待设备连接后按 `docs/HANDOFF.md` §2.2 清单回归。
+- **已知问题与后续事项**：
+  - 已知问题：前台服务通知、通知权限弹窗、系统删除弹窗拦截与离线指令修复均尚未真机复验；`FOREGROUND_SERVICE_SPECIAL_USE` 在 Google Play 上架时需补充用途说明（本工程为侧载/GitHub 分发）。
+  - 后续事项：连接荣耀 VKJ-AN00 后安装新 APK，逐项回归 `docs/HANDOFF.md` §2.2 清单；再评估是否把“任务取消按钮/进度条”与多会话存档纳入下一迭代。
+- **Git 提交标识**：待提交（本轮工作区变更）
+
 
 
 

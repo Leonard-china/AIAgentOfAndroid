@@ -1,5 +1,6 @@
 package com.aiagent.android.floating
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -120,7 +121,9 @@ class FloatingAssistantService : Service() {
         initMessages()
         initView()
 
-        updateNotification(currentState)
+        // startForegroundService 要求 5 秒内进入前台；同时保证悬浮窗与“随时唤出”
+        // 通知不会因后台限制被系统快速回收。
+        startForeground(NOTIFICATION_ID, buildNotification(currentState))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -145,7 +148,7 @@ class FloatingAssistantService : Service() {
                 stopSelf()
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onDestroy() {
@@ -993,6 +996,10 @@ class FloatingAssistantService : Service() {
     }
 
     private fun updateNotification(state: FloatingState) {
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(state))
+    }
+
+    private fun buildNotification(state: FloatingState): Notification {
         val showIntent = PendingIntent.getService(
             this, 101,
             Intent(this, FloatingAssistantService::class.java).apply { action = FloatingAssistantManager.ACTION_SHOW },
@@ -1036,7 +1043,7 @@ class FloatingAssistantService : Service() {
             .addAction(0, "✕ 关闭", stopIntent)
             .build()
 
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        return notification
     }
 
     private class FloatingLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {

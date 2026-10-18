@@ -76,9 +76,9 @@ class MainActivity : ComponentActivity() {
 
         refreshData()
 
-        intent?.getStringExtra("prompt")?.let { prompt ->
-            if (prompt.isNotBlank()) handleUserPrompt(prompt)
-        }
+        // 安全说明：不再接受外部 Intent 传入的 "prompt" 指令。
+        // MainActivity 必须 exported=true 才能作为启动器，若解析任意调用方传入的
+        // prompt，将允许第三方应用借用户之手触发 AI 工具与屏幕自动化，故彻底移除该入口。
 
         setContent {
             AIAgentTheme {
@@ -196,10 +196,15 @@ class MainActivity : ComponentActivity() {
                 val res = app.trashExecutor.onConsentResultReceived(plan, result.resultCode)
                 when (res) {
                     is TrashOperationExecutor.TrashResult.Completed -> {
+                        val content = if (res.plan.status == PlanStatus.PARTIAL_SUCCESS) {
+                            "⚠️ 回收站操作已提交，但复核发现部分目标仍留在原位置（可能被其他应用占用或移动）。请在【操作记录】中查看审计详情，并重新扫描确认。"
+                        } else {
+                            "✅ 操作成功！已将 ${res.plan.targets.size} 个文件移入系统回收站，预计可释放空间 ${formatBytes(res.releasedBytes)}。"
+                        }
                         messages.add(
                             AiMessage(
                                 sender = "ASSISTANT",
-                                content = "✅ 操作成功！已将 ${res.plan.targets.size} 个文件移入系统回收站，预计可释放空间 ${formatBytes(res.releasedBytes)}。"
+                                content = content
                             )
                         )
                         loadStorageData()
@@ -241,6 +246,16 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf<String>()
+
+        // Android 13+ (API 33+)：桌面悬浮窗的常驻通知（随时唤出/贴边/隐身）依赖该权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+
@@ -405,8 +420,19 @@ class MainActivity : ComponentActivity() {
                     loadAuditData()
                 }
                 is TrashOperationExecutor.TrashResult.TargetChanged -> {
-                    plan.status = PlanStatus.PREVIEW
-                    Toast.makeText(this@MainActivity, "注意：有 ${result.missingCount} 个文件已不存在，已重新生成最新清单，请重新确认！", Toast.LENGTH_LONG).show()
+                    // 目标清单已发生变化：必须把重新校验后的最新计划回写到对应消息卡片，
+                    // 否则用户再次点击“确认”仍会提交旧清单，陷入反复提示的死循环。
+                    result.plan.status = PlanStatus.PREVIEW
+                    val planMessageIndex = messages.indexOfFirst { it.plan === plan }
+                    if (planMessageIndex >= 0) {
+                        messages[planMessageIndex] = messages[planMessageIndex].copy(plan = result.plan)
+                    }
+                    val remainingCount = result.plan.targets.size
+                    Toast.makeText(
+                        this@MainActivity,
+                        "注意：有 ${result.missingCount} 个文件已不存在，清单已更新为剩余 $remainingCount 个文件，请重新确认！",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
                 is TrashOperationExecutor.TrashResult.Failed -> {
                     plan.status = PlanStatus.FAILED
@@ -463,17 +489,6 @@ class MainActivity : ComponentActivity() {
                 restoreConsentLauncher.launch(intentSenderRequest)
             } else {
                 Toast.makeText(this@MainActivity, "当前系统不支持或未找到待还原文件", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        intent.getStringExtra("prompt")?.let { prompt ->
-            if (prompt.isNotBlank()) {
-                currentTab = AppTab.ASSISTANT
-                handleUserPrompt(prompt)
             }
         }
     }

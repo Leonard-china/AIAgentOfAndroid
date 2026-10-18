@@ -86,6 +86,10 @@ flowchart TD
 构建产物位于：
 `app/build/outputs/apk/release/app-release.apk`
 
+> **签名说明**：`release.keystore` 不随仓库分发。本机缺少该密钥库时，`assembleRelease` 仍会成功但产出**未签名** APK；
+> 可通过环境变量 `AIAGENT_STORE_PASSWORD` / `AIAGENT_KEY_ALIAS` / `AIAGENT_KEY_PASSWORD`（或 Gradle 属性
+> `aiagent.storePassword` 等）提供签名口令，避免把密码写死在构建脚本中。
+
 ### 方式 2：真机一键安装
 ```powershell
 adb push app\build\outputs\apk\release\app-release.apk /data/local/tmp/app.apk

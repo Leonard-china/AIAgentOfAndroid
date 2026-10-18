@@ -192,16 +192,17 @@ class AgentOrchestrator(
         onStepUpdated: (List<TaskStep>) -> Unit
     ): AiMessage = withContext(Dispatchers.IO) {
         val lower = userPrompt.lowercase()
+        val intent = OfflineIntentClassifier.classify(userPrompt)
 
-        when {
-            lower.contains("开新对话") || lower.contains("新建对话") || lower.contains("清空对话") || lower.contains("重新开始") -> {
+        when (intent) {
+            OfflineIntent.NEW_CHAT -> {
                 AiMessage(
                     sender = "ASSISTANT",
                     content = "✨ 已为您开启新对话！之前的上下文已重置，您可以随时向我提出新的文件管理或屏幕操作需求。"
                 )
             }
 
-            lower.contains("占空间") || lower.contains("什么最占") || lower.contains("存储") -> {
+            OfflineIntent.STORAGE_OVERVIEW -> {
                 steps.add(TaskStep(1, "查询设备闪存物理占用与分类", "RUNNING", "正在调用底层 StatFs 与 MediaStore..."))
                 onStepUpdated(steps.toList())
 
@@ -228,7 +229,7 @@ class AgentOrchestrator(
                 AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
             }
 
-            lower.contains("视频") || lower.contains("500mb") || lower.contains("大文件") -> {
+            OfflineIntent.LARGE_VIDEOS -> {
                 steps.add(TaskStep(1, "检索超过 500MB 的大视频", "RUNNING", "正在扫描 MediaStore 媒体库..."))
                 onStepUpdated(steps.toList())
 
@@ -265,7 +266,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("重复") || lower.contains("查重") -> {
+            OfflineIntent.DUPLICATE_FILES -> {
                 steps.add(TaskStep(1, "扫描媒体库候选文件", "RUNNING", "正在建立候选文件索引..."))
                 onStepUpdated(steps.toList())
 
@@ -330,7 +331,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("截图") || lower.contains("截屏") -> {
+            OfflineIntent.SCREENSHOTS -> {
                 steps.add(TaskStep(1, "查找相册截屏图片", "RUNNING", "正在筛选 Screenshots 目录..."))
                 onStepUpdated(steps.toList())
 
@@ -349,7 +350,7 @@ class AgentOrchestrator(
                 )
             }
 
-            lower.contains("安装包") || lower.contains("apk") -> {
+            OfflineIntent.APK_FILES -> {
                 steps.add(TaskStep(1, "检索存储目录中的安装包", "RUNNING", "正在扫描 .apk 文件..."))
                 onStepUpdated(steps.toList())
 
@@ -378,7 +379,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("相似") || lower.contains("连拍") -> {
+            OfflineIntent.SIMILAR_PHOTOS -> {
                 steps.add(TaskStep(1, "扫描相册候选照片", "RUNNING", "正在读取相册照片..."))
                 onStepUpdated(steps.toList())
 
@@ -418,7 +419,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("系统存储") || lower.contains("设置") || lower.contains("清理页面") -> {
+            OfflineIntent.OPEN_STORAGE_SETTINGS -> {
                 steps.add(TaskStep(1, "打开系统存储设置页面", "RUNNING", "正在调起系统存储 Intent..."))
                 onStepUpdated(steps.toList())
 
@@ -434,7 +435,7 @@ class AgentOrchestrator(
                 )
             }
 
-            lower.contains("连点") || lower.contains("点击") || lower.contains("按一下") || lower.contains("点一下") || lower.contains("点按") -> {
+            OfflineIntent.SCREEN_CLICK -> {
                 steps.add(TaskStep(1, "执行屏幕辅助点击操作", "RUNNING", "正在检查无障碍辅助服务..."))
                 onStepUpdated(steps.toList())
 
@@ -469,7 +470,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("滑动") || lower.contains("下滑") || lower.contains("上滑") || lower.contains("翻页") -> {
+            OfflineIntent.SCREEN_SWIPE -> {
                 steps.add(TaskStep(1, "执行屏幕手势滑动", "RUNNING", "正在检查手势服务..."))
                 onStepUpdated(steps.toList())
 
@@ -497,7 +498,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("返回") || lower.contains("回桌面") || lower.contains("桌面") -> {
+            OfflineIntent.SCREEN_GLOBAL -> {
                 steps.add(TaskStep(1, "执行系统全局按键", "RUNNING", "正在发送全局指令..."))
                 onStepUpdated(steps.toList())
 
@@ -525,7 +526,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("屏幕有什么") || lower.contains("看屏幕") || lower.contains("查看屏幕") -> {
+            OfflineIntent.INSPECT_SCREEN -> {
                 if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
                     openAccessibilitySettingsInternal()
                     AiMessage(
@@ -541,7 +542,7 @@ class AgentOrchestrator(
                 }
             }
 
-            lower.contains("无障碍") || lower.contains("连点器") || lower.contains("辅助服务") -> {
+            OfflineIntent.OPEN_ACCESSIBILITY_SETTINGS -> {
                 openAccessibilitySettingsInternal()
                 AiMessage(
                     sender = "ASSISTANT",
@@ -549,7 +550,7 @@ class AgentOrchestrator(
                 )
             }
 
-            lower.contains("悬浮窗") || lower.contains("悬浮球") || lower.contains("浮窗") -> {
+            OfflineIntent.FLOATING_WINDOW -> {
                 val hasPermission = FloatingAssistantManager.hasOverlayPermission(context)
                 if (!hasPermission) {
                     FloatingAssistantManager.requestOverlayPermission(context)
@@ -792,19 +793,27 @@ class AgentOrchestrator(
 
                     when {
                         !text.isNullOrBlank() -> {
-                            val clicked = ScreenAssistantAccessibilityService.findAndClick(text)
-                            if (clicked) {
-                                "成功点击屏幕上包含文字「$text」的控件。"
+                            if (ScreenAssistantAccessibilityService.isDestructiveSystemDialogActive()) {
+                                "安全策略已拦截：当前为系统级删除/清空确认弹窗，禁止通过屏幕自动化代替用户点击，请用户手动确认。"
                             } else {
-                                "未在当前屏幕中找到包含文字「$text」的控件。您可以先调用 inspect_current_screen 查看当前屏幕元素或使用坐标模拟点击。"
+                                val clicked = ScreenAssistantAccessibilityService.findAndClick(text)
+                                if (clicked) {
+                                    "成功点击屏幕上包含文字「$text」的控件。"
+                                } else {
+                                    "未在当前屏幕中找到包含文字「$text」的控件。您可以先调用 inspect_current_screen 查看当前屏幕元素或使用坐标模拟点击。"
+                                }
                             }
                         }
                         x != null && y != null -> {
-                            val clicked = ScreenAssistantAccessibilityService.clickAt(x, y)
-                            if (clicked) {
-                                "成功在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟点击（连点器手势模式）。"
+                            if (ScreenAssistantAccessibilityService.isDestructiveSystemDialogActive()) {
+                                "安全策略已拦截：当前为系统级删除/清空确认弹窗，禁止通过屏幕自动化代替用户点击，请用户手动确认。"
                             } else {
-                                "在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟手势点击失败。"
+                                val clicked = ScreenAssistantAccessibilityService.clickAt(x, y)
+                                if (clicked) {
+                                    "成功在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟点击（连点器手势模式）。"
+                                } else {
+                                    "在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟手势点击失败。"
+                                }
                             }
                         }
                         else -> "参数错误：请提供要点击的文字 (text) 或坐标 (x, y)。"

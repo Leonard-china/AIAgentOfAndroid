@@ -93,9 +93,16 @@ class TrashOperationExecutor(
         resultCode: Int
     ): TrashResult = withContext(Dispatchers.IO) {
         if (resultCode == Activity.RESULT_OK) {
-            // Re-verify files are now in trash
+            // 真实复核：系统弹窗返回 RESULT_OK 并不等于每个目标都已离开原位置
+            // （可能被其他应用重新占用、移动或权限变化），必须逐一查询确认。
             val totalBytes = plan.targets.sumOf { it.sizeBytes }
-            val updatedPlan = plan.copy(status = PlanStatus.SUCCESS)
+            val stillPresentCount = plan.targets.count { target ->
+                verifyUriExists(Uri.parse(target.uriString))
+            }
+            val allRemoved = stillPresentCount == 0
+            val updatedPlan = plan.copy(
+                status = if (allRemoved) PlanStatus.SUCCESS else PlanStatus.PARTIAL_SUCCESS
+            )
 
             val auditId = dbHelper.insertAuditRecord(
                 AuditRecord(
@@ -103,7 +110,7 @@ class TrashOperationExecutor(
                     planTitle = plan.title,
                     targetCount = plan.targets.size,
                     releasedBytes = totalBytes,
-                    status = "SUCCESS_TRASHED",
+                    status = if (allRemoved) "SUCCESS_TRASHED" else "PARTIAL_TRASHED",
                     detailsJson = Gson().toJson(plan.targets)
                 )
             )

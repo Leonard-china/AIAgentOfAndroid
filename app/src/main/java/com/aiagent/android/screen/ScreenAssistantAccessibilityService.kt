@@ -20,7 +20,47 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         private var instance: ScreenAssistantAccessibilityService? = null
         private val emergencyStop = AtomicBoolean(false)
 
+        /** 系统级破坏性确认弹窗的文本特征，用于硬性拦截自动代点。 */
+        private val destructiveKeywords = listOf(
+            "移至最近删除", "永久删除", "清除全部", "格式化", "清空", "删除", "卸载"
+        )
+
         fun isServiceRunning(): Boolean = isConnected && instance != null
+
+        /**
+         * 检测当前活跃窗口是否为“系统级 + 含破坏性文案”的确认弹窗。
+         * 仅对系统包生效，避免误伤普通应用内带有“删除”字样的正常界面。
+         */
+        fun isDestructiveSystemDialogActive(): Boolean {
+            val svc = instance ?: return false
+            return activeWindowLooksDestructive(svc)
+        }
+
+        private fun activeWindowLooksDestructive(svc: ScreenAssistantAccessibilityService): Boolean {
+            val root = svc.rootInActiveWindow ?: return false
+            val pkg = root.packageName?.toString().orEmpty()
+            val isSystemWindow = pkg == "android" ||
+                    pkg.startsWith("com.android.") ||
+                    pkg.startsWith("com.google.android.") ||
+                    pkg.startsWith("com.hihonor.") ||
+                    pkg.startsWith("com.huawei.")
+            if (!isSystemWindow) return false
+
+            var matched = false
+            fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+                if (node == null || matched || depth > 6) return
+                val label = node.text?.toString() ?: node.contentDescription?.toString()
+                if (label != null && destructiveKeywords.any { label.contains(it) }) {
+                    matched = true
+                    return
+                }
+                for (i in 0 until node.childCount) {
+                    walk(node.getChild(i), depth + 1)
+                }
+            }
+            walk(root, 0)
+            return matched
+        }
 
         fun triggerEmergencyStop() {
             emergencyStop.set(true)
@@ -29,6 +69,8 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         fun clickAt(x: Float, y: Float, durationMs: Long = 50L): Boolean {
             if (emergencyStop.get()) return false
             val svc = instance ?: return false
+            // 安全铁律：绝不通过屏幕自动化代点系统级删除/清空确认弹窗
+            if (activeWindowLooksDestructive(svc)) return false
             val path = Path().apply { moveTo(x, y) }
             val gesture = GestureDescription.Builder()
                 .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
@@ -117,7 +159,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
             val root = svc.rootInActiveWindow ?: return false
 
             // Safety check: Never automate clicks on destructive confirmation dialogs!
-            if (keyword.contains("删除") || keyword.contains("清除全部") || keyword.contains("格式化")) {
+            if (destructiveKeywords.any { keyword.contains(it) }) {
                 // Strict adherence to safety rule: Never auto-click delete popups!
                 return false
             }

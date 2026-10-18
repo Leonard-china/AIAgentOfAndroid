@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 
 object FloatingAssistantManager {
     const val ACTION_SHOW = "com.aiagent.android.floating.ACTION_SHOW"
@@ -38,7 +39,7 @@ object FloatingAssistantManager {
         val intent = Intent(context, FloatingAssistantService::class.java).apply {
             action = ACTION_SHOW
         }
-        context.startService(intent)
+        ContextCompat.startForegroundService(context, intent)
         return true
     }
 
@@ -50,7 +51,7 @@ object FloatingAssistantManager {
         val intent = Intent(context, FloatingAssistantService::class.java).apply {
             action = ACTION_SHOW
         }
-        context.startService(intent)
+        ContextCompat.startForegroundService(context, intent)
         return true
     }
 
@@ -58,21 +59,21 @@ object FloatingAssistantManager {
         val intent = Intent(context, FloatingAssistantService::class.java).apply {
             action = ACTION_HIDE
         }
-        context.startService(intent)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     fun dockFloatingService(context: Context) {
         val intent = Intent(context, FloatingAssistantService::class.java).apply {
             action = ACTION_DOCK
         }
-        context.startService(intent)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     fun toggleFloatingService(context: Context) {
         val intent = Intent(context, FloatingAssistantService::class.java).apply {
             action = ACTION_TOGGLE
         }
-        context.startService(intent)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     fun stopFloatingService(context: Context) {

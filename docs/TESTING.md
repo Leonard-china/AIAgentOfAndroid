@@ -33,7 +33,7 @@
 # 3. 构建 Debug APK 安装包
 .\gradlew.bat assembleDebug
 
-# 4. 构建 Release APK（待配置签名）
+# 4. 构建 Release APK（本机存在 release.keystore 时自动签名；缺失时产出未签名 APK）
 .\gradlew.bat assembleRelease
 
 # 5. 查看连接设备
@@ -54,8 +54,10 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe install -r app
 | **存储层** | `FormatBytesTest` | 验证 0B、KB、MB、500MB、GB 边界单位格式化 | `PASSED` (单元测试通过) |
 | **工具层** | `DuplicateDetectionLogicTest` | 验证 O(1) 大小粗筛剔除唯一文件，减少哈希 I/O | `PASSED` (单元测试通过) |
 | **工具层** | `ActionPlanSafetyTest` | 验证操作计划在 PREVIEW 状态前不可执行，安全状态流转 | `PASSED` (单元测试通过) |
-| **编排层** | `ToolRegistryTest` | 验证 7 大核心工具 Schema 完整性与必需参数（target_ids, reason） | `PASSED` (单元测试通过) |
+| **编排层** | `ToolRegistryTest` | 验证 15 个工具 Schema 完整性与必需参数（target_ids, reason） | `PASSED` (单元测试通过) |
+| **编排层** | `OfflineIntentClassifierTest` | 验证离线意图优先级：悬浮窗/点击/无障碍/查看屏幕/存储等指令不被更宽泛关键词抢占 | `PASSED` (5 个用例通过) |
 | **构建层** | `assembleDebug` | 验证 Android 16/Compose/D8 全量打包链路及资源装配 | `PASSED` (生成 63.8MB APK) |
+| **构建层** | `testDebugUnitTest` | 6 个测试类、16 个用例的全量回归 | `PASSED` (0 失败) |
 
 ---
 
