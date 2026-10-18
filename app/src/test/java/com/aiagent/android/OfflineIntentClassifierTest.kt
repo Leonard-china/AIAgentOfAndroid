@@ -49,6 +49,23 @@ class OfflineIntentClassifierTest {
     }
 
     @Test
+    fun testLaunchAppIntents() {
+        assertEquals(OfflineIntent.LAUNCH_APP, OfflineIntentClassifier.classify("打开B站"))
+        assertEquals(OfflineIntent.LAUNCH_APP, OfflineIntentClassifier.classify("帮我打开哔哩哔哩"))
+        assertEquals(OfflineIntent.LAUNCH_APP, OfflineIntentClassifier.classify("启动微信"))
+        assertEquals(OfflineIntent.LAUNCH_APP, OfflineIntentClassifier.classify("打开抖音"))
+        assertEquals(OfflineIntent.LAUNCH_APP, OfflineIntentClassifier.classify("运行知乎客户端"))
+    }
+
+    @Test
+    fun testExtractAppName() {
+        assertEquals("B站", OfflineIntentClassifier.extractAppName("打开B站"))
+        assertEquals("哔哩哔哩", OfflineIntentClassifier.extractAppName("帮我打开哔哩哔哩应用"))
+        assertEquals("微信", OfflineIntentClassifier.extractAppName("请启动微信客户端"))
+        assertEquals("抖音", OfflineIntentClassifier.extractAppName("立即打开抖音"))
+    }
+
+    @Test
     fun testUnknownFallsBackToHelp() {
         assertEquals(OfflineIntent.UNKNOWN, OfflineIntentClassifier.classify("今天天气怎么样"))
         assertEquals(OfflineIntent.UNKNOWN, OfflineIntentClassifier.classify("你好"))

@@ -57,9 +57,14 @@
   - 建立 GitHub 远程仓库：`https://github.com/Leonard-china/AIAgentOfAndroid`；
   - 发布 GitHub Release `v1.0.0` 并挂载正式 Release APK 资产包。
 - [x] **单元测试与打包**：
-  - `.\gradlew.bat testDebugUnitTest` 6 个测试类、16 个单元测试用例全量通过（0 失败），其中新增 `OfflineIntentClassifierTest` 5 个回归用例；
+  - `.\gradlew.bat testDebugUnitTest` 6 个测试类、18 个单元测试用例全量通过（0 失败）；
   - `.\gradlew.bat assembleDebug` 全量通过；
   - `.\gradlew.bat assembleRelease` 全量通过，生成正式签名 Release 安装包（本机存在 `release.keystore`）。
+- [x] **原生应用启动能力与受限设置解除指引 (launch_app & Restricted Settings Guide)**：
+  - **原生应用启动**：遵循 Native First 铁律，新增 `AppLauncherHelper`，基于 `PackageManager.getLaunchIntentForPackage` 原生调起外部 App，解决“打开B站”误点击聊天气泡的缺陷；
+  - **双模工具链**：`ToolRegistry` 注册第 16 个核心工具 `launch_app`，System Prompt 严禁屏幕盲点；`OfflineIntentClassifier` 新增 `OfflineIntent.LAUNCH_APP` 与 `extractAppName`，离线规则同样支持原生启动；
+  - **权限与清单**：`AndroidManifest.xml` 新增 `QUERY_ALL_PACKAGES` 与 `<queries>` Launcher 声明；
+  - **受限设置解除指引**：`SettingsScreen` 针对 Android 13+ 外部安装提示“受限制的设置”，新增一键跳转应用信息页按钮（`ACTION_APPLICATION_DETAILS_SETTINGS`）与操作贴士。
 - [x] **P1/P2 缺陷修复（2026-10-18 08:13，构建与单元测试已验证）**：
   - **离线意图回归修复**：新增 `OfflineIntentClassifier` 纯函数并重排优先级，“打开桌面悬浮窗”不再错误执行 HOME、“帮我点设置”不再打开存储设置页、“打开无障碍设置/查看当前屏幕”可正确匹配；
   - **回收站清单回写**：目标文件被外部移除时，`MainActivity` 将重新校验后的最新计划回写消息卡片，消除“反复确认旧清单”的死循环；

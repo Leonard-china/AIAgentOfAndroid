@@ -23,6 +23,7 @@ enum class OfflineIntent {
     DUPLICATE_FILES,
     LARGE_VIDEOS,
     OPEN_STORAGE_SETTINGS,
+    LAUNCH_APP,
     STORAGE_OVERVIEW,
     UNKNOWN
 }
@@ -63,13 +64,40 @@ object OfflineIntentClassifier {
             hasAny("视频", "500mb", "大文件") -> OfflineIntent.LARGE_VIDEOS
 
             // 8. 存储设置页：这些短语需要先于泛化的“存储”统计分支
-            hasAny("系统存储", "存储设置", "存储管理", "打开设置", "清理页面", "系统设置", "设置页面", "设置") ->
+            hasAny("系统存储", "存储设置", "存储管理", "打开设置", "清理页面", "系统设置", "设置页面") ->
                 OfflineIntent.OPEN_STORAGE_SETTINGS
 
-            // 9. 存储总览：最后匹配宽泛的“存储/占空间”
+            // 9. 启动/打开应用：优先原生 Intent 调起外部 App（如“打开B站”、“启动微信”）
+            hasAny("打开", "启动", "运行") || hasAny("b站", "哔哩哔哩", "微信", "支付宝", "抖音", "小红书", "快手", "微博", "知乎", "网易云", "淘宝", "京东", "拼多多", "高德") ->
+                OfflineIntent.LAUNCH_APP
+
+            // 10. 存储总览：最后匹配宽泛的“存储/占空间”
             hasAny("占空间", "什么最占", "存储", "空间占用") -> OfflineIntent.STORAGE_OVERVIEW
 
             else -> OfflineIntent.UNKNOWN
         }
+    }
+
+    /**
+     * 从用户的打开指令中提取目标应用名称或别名
+     * 例如："打开B站" -> "B站"，"请帮我启动哔哩哔哩客户端" -> "哔哩哔哩"
+     */
+    fun extractAppName(prompt: String): String {
+        var clean = prompt.trim()
+        val prefixes = listOf("帮我打开", "请帮我打开", "帮我启动", "请打开", "请启动", "立即打开", "打开", "启动", "运行", "帮我进入", "进入")
+        for (prefix in prefixes) {
+            if (clean.startsWith(prefix, ignoreCase = true)) {
+                clean = clean.substring(prefix.length).trim()
+                break
+            }
+        }
+        val suffixes = listOf("应用", "软件", "app", "客户端")
+        for (suffix in suffixes) {
+            if (clean.endsWith(suffix, ignoreCase = true)) {
+                clean = clean.substring(0, clean.length - suffix.length).trim()
+                break
+            }
+        }
+        return clean.ifBlank { prompt.trim() }
     }
 }

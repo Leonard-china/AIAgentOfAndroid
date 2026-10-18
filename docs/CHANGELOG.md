@@ -413,6 +413,46 @@
   - 已知问题：前台服务通知、通知权限弹窗、系统删除弹窗拦截与离线指令修复均尚未真机复验；`FOREGROUND_SERVICE_SPECIAL_USE` 在 Google Play 上架时需补充用途说明（本工程为侧载/GitHub 分发）。
   - 后续事项：连接荣耀 VKJ-AN00 后安装新 APK，逐项回归 `docs/HANDOFF.md` §2.2 清单；再评估是否把“任务取消按钮/进度条”与多会话存档纳入下一迭代。
 - **Git 提交标识**：`5b659c1`
+---
+
+## [2026-10-18 09:38:00] - 修复“打开应用”误点自身聊天气泡问题：原生 launch_app 工具、离线启动与受限设置指引
+
+- **变更摘要**：
+  - **核心缺陷复盘与修复**：
+    - 复盘：用户发送“打开B站”时，由于此前缺少启动应用工具，大模型退而调用 `operate_screen_click(text="打开B站")`；在当前聊天页中无障碍匹配并点击了用户自己刚刚发送的消息气泡，误判为点击成功并回复“正在启动中”，但实际未能启动应用；
+    - 落实 **Native First 铁律**：创建 `AppLauncherHelper` 工具组件，通过 Android 原生 `PackageManager.getLaunchIntentForPackage` 直接调起应用，避免屏幕盲点；内置主流应用别名表（B站/哔哩哔哩、微信、支付宝、抖音、小红书、快手、设置、相机等）并支持动态模糊匹配扫描。
+  - **新增 `launch_app` 工具声明与编排层升级**：
+    - `ToolRegistry` 新增第 16 个核心工具 `launch_app`，支持指定 `app_name`；
+    - `AgentOrchestrator` 更新 System Prompt，明令严禁调用屏幕点击去点聊天界面的文字；
+    - 离线规划引擎新增 `OfflineIntent.LAUNCH_APP` 与 `extractAppName`，离线模式下同样支持“打开B站”、“启动微信”等原生调起。
+  - **无障碍受限制设置体验优化**：
+    - `SettingsScreen` 针对 Android 13+ 外部安装提示“受限制的设置”，增加直达应用信息页按钮（`ACTION_APPLICATION_DETAILS_SETTINGS`）与操作贴士。
+  - **清单与权限**：
+    - `AndroidManifest.xml` 新增 `QUERY_ALL_PACKAGES` 与 `<queries>` 声明，支持精准检索 Launcher 应用。
+- **修改原因**：
+  - 解决用户在真机上输入“打开B站”时提示成功但应用实际未打开的问题，兑现系统应用启动的原生闭环能力。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/tools/AppLauncherHelper.kt`（新增）
+  - `app/src/main/java/com/aiagent/android/ai/ToolRegistry.kt`
+  - `app/src/main/java/com/aiagent/android/ai/OfflineIntentClassifier.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/main/java/com/aiagent/android/ui/SettingsScreen.kt`
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/test/java/com/aiagent/android/OfflineIntentClassifierTest.kt`
+  - `app/src/test/java/com/aiagent/android/ToolRegistryTest.kt`
+  - `docs/CHANGELOG.md`
+  - `docs/HANDOFF.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. Release APK 构建：`.\gradlew.bat assembleRelease`。
+  - 真实结果：
+    1. 单元测试全量通过：`ToolRegistryTest`（16 个工具）、`OfflineIntentClassifierTest`（覆盖“打开B站”、“启动微信”等用例）全部通过；
+    2. `assembleRelease` 构建通过（耗时 15s），产出正式带签名 APK `app-release.apk`。
+- **已知问题与后续事项**：
+  - 设备连接后推送安装并真机验证“打开B站”唤起行为。
+- **Git 提交标识**：待提交（本轮工作区变更）
+
 
 
 

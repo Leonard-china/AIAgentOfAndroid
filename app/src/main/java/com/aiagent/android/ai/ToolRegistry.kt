@@ -230,6 +230,25 @@ object ToolRegistry {
             }
         ))
 
+        // 16. launch_app
+        tools.add(createToolFunction(
+            name = "launch_app",
+            description = "【原生启动】在手机上直接启动指定的已安装应用程序（例如：B站/哔哩哔哩、微信、支付宝、相册、相机、设置、抖音、音乐等）。优先通过原生 Intent 秒级调起应用，严禁使用屏幕点击去瞎点聊天界面的文字！",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val nameProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "要打开的应用名称或别名（例如：'B站'、'哔哩哔哩'、'微信'、'支付宝'、'设置'）")
+                    }
+                    add("app_name", nameProp)
+                }
+                add("properties", props)
+                val required = JsonArray().apply { add("app_name") }
+                add("required", required)
+            }
+        ))
+
         return tools
     }
 

@@ -335,6 +335,27 @@ fun SettingsScreen(
                         ) {
                             Text("前往系统无障碍设置开启服务")
                         }
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("若提示「受限制的设置」：前往解除限制")
+                            }
+                            Text(
+                                text = "💡 Android 13+ 提示「受限制的设置」或禁止开启：点击上方按钮进入应用详情 -> 点击右上角「⋮」选择「允许受限制的设置」验证密码后即可正常开启。",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                            )
+                        }
                     }
                 }
             }

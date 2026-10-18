@@ -16,6 +16,7 @@ import com.aiagent.android.model.TaskStep
 import com.aiagent.android.model.formatBytes
 import com.aiagent.android.screen.ScreenAssistantAccessibilityService
 import com.aiagent.android.security.KeyStoreVault
+import com.aiagent.android.tools.AppLauncherHelper
 import com.aiagent.android.tools.DuplicateDetectionEngine
 import com.aiagent.android.tools.MediaScannerEngine
 import com.aiagent.android.tools.SimilarPhotoEngine
@@ -80,6 +81,7 @@ class AgentOrchestrator(
             【屏幕操作、连点器与桌面悬浮窗辅助能力】
             9. 你拥有通过受控无障碍服务操作屏幕的能力（类似于手机连点器与手势模拟）！当用户要求你点击屏幕、操作界面、返回、滑动或导航时，【绝对不要】以“系统安全限制”、“我无法操作屏幕”为由拒绝！
             10. 屏幕操作与桌面悬浮窗工具说明：
+                - 打开手机应用（如打开B站、微信、设置、相机、相册、音乐等）：【必须调用 launch_app(app_name="应用名")】！系统将直接通过原生 Launch Intent 秒级启动目标应用！绝对禁止调用 operate_screen_click 去点击屏幕上的文字（否则会错误点击聊天气泡）！
                 - 查找并点击界面文字或按钮：调用 operate_screen_click(text="文字")；
                 - 连点器坐标点击：调用 operate_screen_click(x=横坐标, y=纵坐标)；
                 - 滑动翻页：调用 operate_screen_swipe(direction="UP"|"DOWN"|"LEFT"|"RIGHT")；
@@ -579,6 +581,27 @@ class AgentOrchestrator(
                 }
             }
 
+            OfflineIntent.LAUNCH_APP -> {
+                val appName = OfflineIntentClassifier.extractAppName(userPrompt)
+                steps.add(TaskStep(1, "启动应用程序: $appName", "RUNNING", "正在查询已安装应用并调起原生启动 Intent..."))
+                onStepUpdated(steps.toList())
+
+                val res = AppLauncherHelper.launchApp(context, appName)
+                steps[0].status = if (res.success) "COMPLETED" else "FAILED"
+                steps[0].detail = res.message
+                onStepUpdated(steps.toList())
+
+                AiMessage(
+                    sender = "ASSISTANT",
+                    content = if (res.success) {
+                        "🚀 ${res.message}"
+                    } else {
+                        "⚠️ ${res.message}"
+                    },
+                    taskSteps = steps
+                )
+            }
+
             else -> {
                 AiMessage(
                     sender = "ASSISTANT",
@@ -893,6 +916,13 @@ class AgentOrchestrator(
                     FloatingAssistantManager.startFloatingService(context)
                     "已成功为您开启桌面悬浮窗助手！您可以返回桌面或切换到任意应用，点击屏幕边缘的悬浮球即可随时与我对话。"
                 }
+            }
+            "launch_app" -> {
+                val appName = if (args.has("app_name") && !args.get("app_name").isJsonNull) {
+                    args.get("app_name").asString
+                } else "应用"
+                val res = AppLauncherHelper.launchApp(context, appName)
+                res.message
             }
             else -> "未知工具: $name"
         }
