@@ -22,6 +22,7 @@ enum class OfflineIntent {
     SIMILAR_PHOTOS,
     DUPLICATE_FILES,
     LARGE_VIDEOS,
+    RECOMMEND_VIDEO,
     OPEN_STORAGE_SETTINGS,
     LAUNCH_APP,
     STORAGE_OVERVIEW,
@@ -56,22 +57,27 @@ object OfflineIntentClassifier {
             hasAny("滑动", "下滑", "上滑", "翻页") -> OfflineIntent.SCREEN_SWIPE
             hasAny("返回", "回桌面", "回到桌面", "桌面") -> OfflineIntent.SCREEN_GLOBAL
 
-            // 7. 相册/文件分析类
+            // 7. 跨应用复合操作：看视频/推视频任务（先于本地大视频检索与单纯打开应用）
+            hasAny("推个视频", "推荐视频", "看视频", "推视频", "看b站", "刷视频", "看个视频", "播放视频", "推个b站视频", "推视频看") ||
+                    (lower.contains("推") && lower.contains("视频")) ||
+                    (lower.contains("b站") && lower.contains("视频")) -> OfflineIntent.RECOMMEND_VIDEO
+
+            // 8. 相册/文件分析类
             hasAny("截图", "截屏") -> OfflineIntent.SCREENSHOTS
             hasAny("安装包", "apk") -> OfflineIntent.APK_FILES
             hasAny("相似", "连拍") -> OfflineIntent.SIMILAR_PHOTOS
             hasAny("重复", "查重") -> OfflineIntent.DUPLICATE_FILES
             hasAny("视频", "500mb", "大文件") -> OfflineIntent.LARGE_VIDEOS
 
-            // 8. 存储设置页：这些短语需要先于泛化的“存储”统计分支
+            // 9. 存储设置页：这些短语需要先于泛化的“存储”统计分支
             hasAny("系统存储", "存储设置", "存储管理", "打开设置", "清理页面", "系统设置", "设置页面") ->
                 OfflineIntent.OPEN_STORAGE_SETTINGS
 
-            // 9. 启动/打开应用：优先原生 Intent 调起外部 App（如“打开B站”、“启动微信”）
+            // 10. 启动/打开应用：优先原生 Intent 调起外部 App（如“打开B站”、“启动微信”）
             hasAny("打开", "启动", "运行") || hasAny("b站", "哔哩哔哩", "微信", "支付宝", "抖音", "小红书", "快手", "微博", "知乎", "网易云", "淘宝", "京东", "拼多多", "高德") ->
                 OfflineIntent.LAUNCH_APP
 
-            // 10. 存储总览：最后匹配宽泛的“存储/占空间”
+            // 11. 存储总览：最后匹配宽泛的“存储/占空间”
             hasAny("占空间", "什么最占", "存储", "空间占用") -> OfflineIntent.STORAGE_OVERVIEW
 
             else -> OfflineIntent.UNKNOWN

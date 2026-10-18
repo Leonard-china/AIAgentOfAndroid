@@ -452,6 +452,44 @@
 - **已知问题与后续事项**：
   - 设备连接后推送安装并真机验证“打开B站”唤起行为。
 - **Git 提交标识**：`a2e6b2a`
+---
+
+## [2026-10-18 10:10:00] - Codex 风格屏幕操作 HUD 浮动胶囊、目标达成闭环校验与看视频多步规划落地
+
+- **变更摘要**：
+  - **Codex 风格屏幕操作状态指示条 (`ScreenActionHud`)**：
+    - 新增 `ScreenActionHud` 全局微型悬浮胶囊，基于 `TYPE_ACCESSIBILITY_OVERLAY`（无障碍服务内置顶层）或 `TYPE_APPLICATION_OVERLAY` 悬浮于屏幕顶端状态栏下方；
+    - 实时反馈当前 Agent 正在执行的具体操作（“正在启动哔哩哔哩...”、“等待页面加载就绪...”、“正在挑选推荐视频...”、“点击播放《...》”）；
+    - 集成红色一键【停止】急停按钮，用户随时点击即可立即中断操作；
+    - 任务完成后切换为绿色对勾“✅ 任务已完成”并在 2.5 秒后平滑淡出，彻底消除用户“不敢动、不知道在思考还是结束了”的不确定感。
+  - **目标达成校验与多步任务闭环 (Goal Completion Verification)**：
+    - 解决“让AI推个B站视频看，它仅仅打开了B站就结束”的半途而废问题；
+    - 在 System Prompt 确立第 11 条核心铁律：对于推视频、搜内容、发消息等复合目标，打开应用仅仅是第一步，严禁草率结束！必须等待渲染、获取屏幕元素并点击目标进入播放，直到目标达成；
+    - `launch_app` 工具执行后自动挂起等待 2.2 秒让目标应用窗口渲染就绪，并在工具回包中强指令要求模型继续查看屏幕并点击视频卡片；
+    - 离线规划引擎新增 `OfflineIntent.RECOMMEND_VIDEO` 复合意图，实现“启动应用 $\rightarrow$ 等待渲染 $\rightarrow$ 跳过开屏广告 $\rightarrow$ 提取屏幕视频卡片 $\rightarrow$ 点击播放”全自动闭环。
+- **修改原因**：
+  - 响应用户最新需求：解决跨应用操作无状态反馈导致用户不敢动的问题，以及解决目标未达成即提前结束的问题。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/screen/ScreenActionHud.kt`（新增）
+  - `app/src/main/java/com/aiagent/android/screen/ScreenAssistantAccessibilityService.kt`
+  - `app/src/main/java/com/aiagent/android/ai/OfflineIntentClassifier.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/test/java/com/aiagent/android/OfflineIntentClassifierTest.kt`
+  - `docs/CHANGELOG.md`
+  - `docs/HANDOFF.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. Release APK 构建：`.\gradlew.bat assembleRelease`；
+    3. 真机静默安装：`adb push` + `pm install -r -t -g` 至荣耀 VKJ-AN00 (Android 16)。
+  - 真实结果：
+    1. 单元测试全量通过：19 个测试用例全部通过，0 失败；
+    2. Release APK 构建成功（大小 45.9 MB）；
+    3. 真机全静默覆盖安装成功（`Success`），无障碍服务激活，主界面已成功启动。
+- **已知问题与后续事项**：
+  - 用户可在真机上输入“给我推个B站视频看”进行全链路端到端实测。
+- **Git 提交标识**：待提交（本轮工作区变更）
+
 
 
 

@@ -58,6 +58,14 @@ class OfflineIntentClassifierTest {
     }
 
     @Test
+    fun testRecommendVideoIntents() {
+        assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("给我推个B站视频看"))
+        assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("帮我推荐一个视频看"))
+        assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("在B站看视频"))
+        assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("刷视频"))
+    }
+
+    @Test
     fun testExtractAppName() {
         assertEquals("B站", OfflineIntentClassifier.extractAppName("打开B站"))
         assertEquals("哔哩哔哩", OfflineIntentClassifier.extractAppName("帮我打开哔哩哔哩应用"))

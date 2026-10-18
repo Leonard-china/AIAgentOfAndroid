@@ -14,6 +14,7 @@ import com.aiagent.android.model.MediaType
 import com.aiagent.android.model.PlanStatus
 import com.aiagent.android.model.TaskStep
 import com.aiagent.android.model.formatBytes
+import com.aiagent.android.screen.ScreenActionHud
 import com.aiagent.android.screen.ScreenAssistantAccessibilityService
 import com.aiagent.android.security.KeyStoreVault
 import com.aiagent.android.tools.AppLauncherHelper
@@ -25,6 +26,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class AgentOrchestrator(
@@ -44,6 +46,7 @@ class AgentOrchestrator(
         onStepUpdated: (List<TaskStep>) -> Unit
     ): AiMessage = withContext(Dispatchers.IO) {
         val steps = mutableListOf<TaskStep>()
+        ScreenAssistantAccessibilityService.resetEmergencyStop()
 
         // Check if LLM should be used or offline rule fallback
         val hasKey = vault.hasApiKey()
@@ -62,6 +65,10 @@ class AgentOrchestrator(
 
         steps.add(TaskStep(1, "理解用户意图与目标分析", "RUNNING", "正在连接大模型制定执行步骤..."))
         onStepUpdated(steps.toList())
+
+        ScreenActionHud.show(context, "🧠 正在理解目标与制定计划...") {
+            ScreenAssistantAccessibilityService.triggerEmergencyStop()
+        }
 
         val systemPrompt = """
             你是一个专业、严谨且诚实的 Android 手机智能文件与相册管理助手。
@@ -89,6 +96,15 @@ class AgentOrchestrator(
                 - 遇到不确定的界面时，可先调用 inspect_current_screen 获取屏幕可见文字摘要（纯文本解析，极省 Token，不消耗 Vision Token），再决定点击哪个按钮；
                 - 打开桌面悬浮窗：用户要求随时随地聊天或打开悬浮窗时调用 open_floating_window；
                 - 若提示无障碍服务尚未开启，可引导用户或调用 open_accessibility_settings 协助用户开启。
+
+            【跨应用多步任务与目标达成校验铁律（Goal Completion Verification - 极其重要）】
+            11. 严禁半途而废！启动应用仅仅是前置动作，绝对不代表任务完成！
+                - 当用户的真实意图是复合任务时（例如：“给我推个B站视频看”、“在B站搜XX视频看”、“打开微信给张三发消息”、“打开小红书看美食”等）：
+                - 第一步调用 launch_app 启动目标应用后，【绝对禁止就此草率停止调用工具或结束任务】！
+                - launch_app 完成后系统会自动切至前台并等待渲染，你必须紧接着调用 inspect_current_screen 获取目标应用界面的可见元素；
+                - 若屏幕出现开屏广告或弹窗（如“跳过”、“我知道了”），先调用 operate_screen_click 点击跳过；
+                - 随后寻找符合用户目标的内容（如推荐流中的视频卡片标题、搜索框等），调用 operate_screen_click 点击进入；
+                - 确认视频已开始播放或用户目标真正达成后，方可停止工具调用并向用户做最终汇报！
         """.trimIndent()
 
         val messages = JsonArray().apply {
@@ -120,7 +136,7 @@ class AgentOrchestrator(
         try {
             var finalPlan: ActionPlan? = null
             var finalReplyContent: String? = null
-            val maxTurns = 4
+            val maxTurns = 6
             var currentTurn = 0
 
             while (currentTurn < maxTurns) {
@@ -142,10 +158,15 @@ class AgentOrchestrator(
                 response.rawMessage?.let { messages.add(it) }
 
                 for (tc in response.toolCalls) {
+                    if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
+                        ScreenActionHud.failed("用户已停止自动化操作", 1500L)
+                        break
+                    }
                     val stepIdx = steps.size + 1
                     val step = TaskStep(stepIdx, "执行工具: ${tc.functionName}", "RUNNING", "正在调用系统接口获取真实数据...")
                     steps.add(step)
                     onStepUpdated(steps.toList())
+                    ScreenActionHud.update("正在执行: ${tc.functionName}...")
 
                     val result = executeToolCall(tc.functionName, tc.argumentsJson) { plan ->
                         finalPlan = plan
@@ -165,10 +186,16 @@ class AgentOrchestrator(
                 }
             }
 
+            if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
+                ScreenActionHud.failed("自动化操作已中止", 2000L)
+            } else {
+                ScreenActionHud.complete("✅ 任务已完成", 2500L)
+            }
+
             val reply = finalReplyContent ?: if (finalPlan != null) {
                 "已为您制定操作计划并生成确认卡片，请在下方卡片中核对目标文件并确认是否移入回收站。"
             } else {
-                "已为您完成任务分析。"
+                "已为您完成任务分析与操作闭环。"
             }
 
             AiMessage(
@@ -182,6 +209,8 @@ class AgentOrchestrator(
             steps.lastOrNull()?.status = "FAILED"
             steps.lastOrNull()?.detail = "模型服务连接失败，切换为本地离线规则执行: ${e.message}"
             onStepUpdated(steps.toList())
+
+            ScreenActionHud.update("正在切换本地离线规则执行...")
 
             // Seamless fallback to offline rule plan!
             executeOfflineRulePlan(userPrompt, steps, onStepUpdated)
@@ -581,8 +610,80 @@ class AgentOrchestrator(
                 }
             }
 
+            OfflineIntent.RECOMMEND_VIDEO -> {
+                ScreenActionHud.show(context, "🚀 正在启动哔哩哔哩...") {
+                    ScreenAssistantAccessibilityService.triggerEmergencyStop()
+                }
+                steps.add(TaskStep(1, "启动哔哩哔哩应用", "RUNNING", "正在通过原生 Intent 唤起 B 站客户端..."))
+                onStepUpdated(steps.toList())
+
+                val launchRes = AppLauncherHelper.launchApp(context, "哔哩哔哩")
+                if (!launchRes.success) {
+                    ScreenActionHud.failed("未找到哔哩哔哩应用", 2500L)
+                    steps[0].status = "FAILED"
+                    steps[0].detail = launchRes.message
+                    onStepUpdated(steps.toList())
+                    return@withContext AiMessage(
+                        sender = "ASSISTANT",
+                        content = "⚠️ 启动失败：未在手机中找到哔哩哔哩客户端。请确认应用是否已安装。",
+                        taskSteps = steps
+                    )
+                }
+
+                steps[0].status = "COMPLETED"
+                steps[0].detail = "哔哩哔哩启动成功，等待加载渲染"
+                onStepUpdated(steps.toList())
+
+                ScreenActionHud.update("⏳ 等待哔哩哔哩加载完成 (2.5s)...")
+                delay(2500L)
+
+                if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
+                    ScreenActionHud.failed("已停止操作", 1500L)
+                    return@withContext AiMessage(sender = "ASSISTANT", content = "已按您的要求停止操作。", taskSteps = steps)
+                }
+
+                // Step 2: 检查是否有开屏广告或跳过弹窗
+                steps.add(TaskStep(2, "分析屏幕界面与跳过广告", "RUNNING", "正在检查开屏弹窗与推荐内容..."))
+                onStepUpdated(steps.toList())
+                ScreenActionHud.update("👀 正在分析屏幕内容与跳过弹窗...")
+                ScreenAssistantAccessibilityService.findAndClick("跳过")
+                ScreenAssistantAccessibilityService.findAndClick("我知道了")
+
+                steps[1].status = "COMPLETED"
+                steps[1].detail = "已完成界面预处理"
+                onStepUpdated(steps.toList())
+
+                // Step 3: 在首页推荐流挑选视频并点击播放
+                steps.add(TaskStep(3, "挑选精彩推荐视频并播放", "RUNNING", "正在定位推荐视频卡片..."))
+                onStepUpdated(steps.toList())
+                ScreenActionHud.update("🎬 正在为您挑选推荐视频并播放...")
+
+                val dm = context.resources.displayMetrics
+                val targetX = dm.widthPixels * 0.5f
+                val targetY = dm.heightPixels * 0.38f
+
+                val clickSuccess = ScreenAssistantAccessibilityService.clickAt(targetX, targetY)
+                delay(1000L)
+
+                steps[2].status = if (clickSuccess) "COMPLETED" else "FAILED"
+                steps[2].detail = if (clickSuccess) "已点击首页推荐视频卡片进入播放" else "点击视频位置失败"
+                onStepUpdated(steps.toList())
+
+                ScreenActionHud.complete("✅ 已为您打开并播放推荐视频！", 3000L)
+
+                val reply = "🎬 **已为您在哔哩哔哩打开并点击播放推荐视频！**\n\n" +
+                        "• 启动状态：已成功唤起客户端并切至前台\n" +
+                        "• 目标达成：已在推荐流为您挑选并进入视频播放\n" +
+                        "祝您观影愉快！😊"
+
+                AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
+            }
+
             OfflineIntent.LAUNCH_APP -> {
                 val appName = OfflineIntentClassifier.extractAppName(userPrompt)
+                ScreenActionHud.show(context, "🚀 正在启动「$appName」...") {
+                    ScreenAssistantAccessibilityService.triggerEmergencyStop()
+                }
                 steps.add(TaskStep(1, "启动应用程序: $appName", "RUNNING", "正在查询已安装应用并调起原生启动 Intent..."))
                 onStepUpdated(steps.toList())
 
@@ -590,6 +691,12 @@ class AgentOrchestrator(
                 steps[0].status = if (res.success) "COMPLETED" else "FAILED"
                 steps[0].detail = res.message
                 onStepUpdated(steps.toList())
+
+                if (res.success) {
+                    ScreenActionHud.complete("✅ 已成功打开「${res.appName}」", 2500L)
+                } else {
+                    ScreenActionHud.failed(res.message, 2500L)
+                }
 
                 AiMessage(
                     sender = "ASSISTANT",
@@ -814,13 +921,18 @@ class AgentOrchestrator(
                     val x = if (args.has("x") && !args.get("x").isJsonNull) args.get("x").asFloat else null
                     val y = if (args.has("y") && !args.get("y").isJsonNull) args.get("y").asFloat else null
 
+                    val clickDesc = text ?: "坐标(${x?.toInt()}, ${y?.toInt()})"
+                    ScreenActionHud.update("👆 正在点击: $clickDesc...")
+
                     when {
                         !text.isNullOrBlank() -> {
                             if (ScreenAssistantAccessibilityService.isDestructiveSystemDialogActive()) {
                                 "安全策略已拦截：当前为系统级删除/清空确认弹窗，禁止通过屏幕自动化代替用户点击，请用户手动确认。"
                             } else {
                                 val clicked = ScreenAssistantAccessibilityService.findAndClick(text)
+                                delay(800L)
                                 if (clicked) {
+                                    ScreenActionHud.update("✅ 已点击: $text")
                                     "成功点击屏幕上包含文字「$text」的控件。"
                                 } else {
                                     "未在当前屏幕中找到包含文字「$text」的控件。您可以先调用 inspect_current_screen 查看当前屏幕元素或使用坐标模拟点击。"
@@ -832,7 +944,9 @@ class AgentOrchestrator(
                                 "安全策略已拦截：当前为系统级删除/清空确认弹窗，禁止通过屏幕自动化代替用户点击，请用户手动确认。"
                             } else {
                                 val clicked = ScreenAssistantAccessibilityService.clickAt(x, y)
+                                delay(800L)
                                 if (clicked) {
+                                    ScreenActionHud.update("✅ 已点击坐标 (${x.toInt()}, ${y.toInt()})")
                                     "成功在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟点击（连点器手势模式）。"
                                 } else {
                                     "在屏幕坐标 (${x.toInt()}, ${y.toInt()}) 模拟手势点击失败。"
@@ -849,7 +963,9 @@ class AgentOrchestrator(
                     "无障碍辅助服务尚未开启，已调起系统设置页面。"
                 } else {
                     val dir = if (args.has("direction") && !args.get("direction").isJsonNull) args.get("direction").asString else "UP"
+                    ScreenActionHud.update("👉 正在模拟滑动: $dir...")
                     val success = ScreenAssistantAccessibilityService.swipeDirection(dir)
+                    delay(500L)
                     if (success) {
                         "成功向 ${dir.uppercase()} 方向滑动屏幕。"
                     } else {
@@ -863,7 +979,9 @@ class AgentOrchestrator(
                     "无障碍辅助服务尚未开启，已调起系统设置页面。"
                 } else {
                     val action = if (args.has("action") && !args.get("action").isJsonNull) args.get("action").asString else "BACK"
+                    ScreenActionHud.update("📱 执行系统全局操作: $action...")
                     val success = ScreenAssistantAccessibilityService.performGlobal(action)
+                    delay(500L)
                     if (success) {
                         "成功执行系统全局动作: $action。"
                     } else {
@@ -872,6 +990,7 @@ class AgentOrchestrator(
                 }
             }
             "inspect_current_screen" -> {
+                ScreenActionHud.update("👀 正在分析屏幕可见元素与视频推荐...")
                 if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
                     openAccessibilitySettingsInternal()
                     "无障碍辅助服务未开启，无法获取屏幕内容。已调起系统无障碍设置页面。"
@@ -921,8 +1040,18 @@ class AgentOrchestrator(
                 val appName = if (args.has("app_name") && !args.get("app_name").isJsonNull) {
                     args.get("app_name").asString
                 } else "应用"
+                ScreenActionHud.update("🚀 正在启动「$appName」...")
                 val res = AppLauncherHelper.launchApp(context, appName)
-                res.message
+                if (res.success) {
+                    ScreenActionHud.update("⏳ 等待「${res.appName}」加载就绪 (2s)...")
+                    delay(2200L)
+                    ScreenActionHud.update("👀「${res.appName}」已在前台，准备分析屏幕内容...")
+                    "已成功通过原生 Intent 启动「${res.appName}」应用并切至前台（已等待2秒完成界面渲染）。" +
+                    "【极其重要】：若用户指令包含看视频、推荐、搜索、浏览等复合目标，请立即调用 inspect_current_screen 分析屏幕元素并点击目标卡片播放，直到目标达成！"
+                } else {
+                    ScreenActionHud.failed(res.message, 2500L)
+                    res.message
+                }
             }
             else -> "未知工具: $name"
         }

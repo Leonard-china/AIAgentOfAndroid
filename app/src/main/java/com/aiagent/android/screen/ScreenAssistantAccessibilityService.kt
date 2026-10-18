@@ -17,7 +17,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         var isConnected: Boolean = false
             private set
 
-        private var instance: ScreenAssistantAccessibilityService? = null
+        internal var instance: ScreenAssistantAccessibilityService? = null
         private val emergencyStop = AtomicBoolean(false)
 
         /** 系统级破坏性确认弹窗的文本特征，用于硬性拦截自动代点。 */
@@ -65,6 +65,12 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         fun triggerEmergencyStop() {
             emergencyStop.set(true)
         }
+
+        fun resetEmergencyStop() {
+            emergencyStop.set(false)
+        }
+
+        fun isEmergencyStopped(): Boolean = emergencyStop.get()
 
         fun clickAt(x: Float, y: Float, durationMs: Long = 50L): Boolean {
             if (emergencyStop.get()) return false

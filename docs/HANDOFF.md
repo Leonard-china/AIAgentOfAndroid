@@ -57,9 +57,13 @@
   - 建立 GitHub 远程仓库：`https://github.com/Leonard-china/AIAgentOfAndroid`；
   - 发布 GitHub Release `v1.0.0` 并挂载正式 Release APK 资产包。
 - [x] **单元测试与打包**：
-  - `.\gradlew.bat testDebugUnitTest` 6 个测试类、18 个单元测试用例全量通过（0 失败）；
+  - `.\gradlew.bat testDebugUnitTest` 6 个测试类、19 个单元测试用例全量通过（0 失败）；
   - `.\gradlew.bat assembleDebug` 全量通过；
   - `.\gradlew.bat assembleRelease` 全量通过，生成正式签名 Release 安装包（本机存在 `release.keystore`）。
+- [x] **Codex 风格屏幕操作 HUD 与目标达成闭环校验 (ScreenActionHud & Goal Verification)**：
+  - **Codex 风格灵动状态指示条 (`ScreenActionHud`)**：基于 `TYPE_ACCESSIBILITY_OVERLAY` 在屏幕顶端悬浮呈现高辨识度胶囊，实时轮播当前 Agent 动作（启动、分析屏幕、点击播放），并提供一键【停止】急停按钮，完成后展示绿勾并平滑淡出；
+  - **目标达成闭环校验 (Goal Completion Verification)**：System Prompt 确立复合目标严禁草率结束铁律；`launch_app` 自动延时 2.2 秒等待界面渲染并在工具回包中强指令要求继续定位目标；离线引擎新增 `RECOMMEND_VIDEO`，实现“启动B站 $\rightarrow$ 页面加载 $\rightarrow$ 跳过广告 $\rightarrow$ 挑选推荐视频 $\rightarrow$ 点击播放”全链路闭环；
+  - **真机已部署**：新版 Release APK 已成功全静默部署至荣耀 VKJ-AN00 (Android 16) 物理机。
 - [x] **原生应用启动能力与受限设置解除指引 (launch_app & Restricted Settings Guide)**：
   - **原生应用启动**：遵循 Native First 铁律，新增 `AppLauncherHelper`，基于 `PackageManager.getLaunchIntentForPackage` 原生调起外部 App，解决“打开B站”误点击聊天气泡的缺陷；
   - **双模工具链**：`ToolRegistry` 注册第 16 个核心工具 `launch_app`，System Prompt 严禁屏幕盲点；`OfflineIntentClassifier` 新增 `OfflineIntent.LAUNCH_APP` 与 `extractAppName`，离线规则同样支持原生启动；
