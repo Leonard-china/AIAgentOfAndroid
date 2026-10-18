@@ -50,20 +50,28 @@
   - 桌面悬浮窗标题栏集成 `IconButton("开新对话")` 图标按钮及悬浮快捷 Chip；
   - 彻底清空内存中累积的消息上下文 (`messages.clear()`)、实时任务步骤 (`activeSteps.clear()`) 并输出全新就绪欢迎语；
   - 支持自然语言和快捷指令拦截（“开新对话/新建对话/清空对话/重新开始”），真机端到端点击与触控验证 100% 成功。
+- [x] **正式 Release 签名打包与 GitHub 远程开源发布**：
+  - 配置 RSA 2048-bit 签名密钥库与 `signingConfigs.release`；
+  - 成功生成带正式签名的 Release APK：`app/build/outputs/apk/release/app-release.apk` (45.8 MB)；
+  - 编写全景根目录 `README.md` 与 Apache 2.0 `LICENSE`；
+  - 建立 GitHub 远程仓库：`https://github.com/Leonard-china/AIAgentOfAndroid`；
+  - 发布 GitHub Release `v1.0.0` 并挂载正式 Release APK 资产包。
 - [x] **单元测试与打包**：
   - `.\gradlew.bat testDebugUnitTest` 15 项工具 Schema 与逻辑单元测试全量通过；
-  - `.\gradlew.bat assembleDebug` 全量通过并成功静默覆盖安装到真机。
+  - `.\gradlew.bat assembleDebug` 全量通过并成功静默覆盖安装到真机；
+  - `.\gradlew.bat assembleRelease` 48 项构建任务成功，生成正式签名 Release 安装包。
 
 ### 2.2 已实现但未验证 (Implemented but Unverified)
 - [ ] **全量相册感知哈希大图集压力测试**：
   - 已在单元测试及小规模图集中验证 `SimilarPhotoEngine`，需在用户全量上千张相册背景并发运行时验证内存与耗时边界。
 
 ### 2.3 尚未实现 (Not Implemented)
+- [ ] **待用户提供生成的图标**：
+  - 待用户通过 GPT 生成专业 App 图标后，导入 Android `res/mipmap` 替换启动器默认图标；
 - [ ] **扩展增量功能**：
   - 基于端侧 NPU/TFLite 的图片本地 Embedding 语义搜图；
   - SAF 自选目录全盘树形重命名与跨卷物理移动；
-  - 历史多会话列表与对话归档切换；
-  - 正式发布用签名证书配置。
+  - 历史多会话列表与对话归档切换。
 
 ---
 
@@ -72,6 +80,7 @@
 - **外部阻塞项**：无重大阻塞。
 - **设备状态**：荣耀 VKJ-AN00 (Android 16) 在线且已安装最新应用版本。
 - **模型状态**：DashScope Qwen KeyStore 加密存储，模型 `qwen-plus` 随时可调用。
+- **开源发布状态**：已在 GitHub 成功发布开源仓库与 Release v1.0.0。
 
 ---
 
@@ -81,17 +90,18 @@
 # 1. 运行本地单元测试
 .\gradlew.bat testDebugUnitTest
 
-# 2. 构建 Debug APK 安装包
-.\gradlew.bat assembleDebug
+# 2. 构建正式 Release APK 安装包
+.\gradlew.bat assembleRelease
 
 # 3. 检查设备在线情况
 C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe devices
 
-# 4. 一键安装至目标手机
-C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe install -r app\build\outputs\apk\debug\app-debug.apk
+# 4. 一键安装 Release 包至目标手机
+C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe push app\build\outputs\apk\release\app-release.apk /data/local/tmp/app.apk
+C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell pm install -r -t -g /data/local/tmp/app.apk
 
 # 5. 启动主页面
-C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start -n com.aiagent.android.debug/com.aiagent.android.ui.MainActivity
+C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start -n com.aiagent.android/com.aiagent.android.ui.MainActivity
 ```
 
 ---
@@ -99,5 +109,5 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start
 ## 5. 当前代码与提交信息
 
 - **当前分支**：`master`
-- **最新提交 Commit**：`836cb83`
-- **最新代码状态**：所有代码、资源、配置与文档均已就绪并全量构建并在真机上验证通过。
+- **最新提交 Commit**：待提交 (本轮提交)
+- **最新代码状态**：所有代码、资源、配置、根 README 与文档均已就绪并全量构建并在真机及 GitHub 上验证通过。

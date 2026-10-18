@@ -321,7 +321,44 @@
 - **已知问题与后续事项**：
   - 已知问题：横屏全屏游戏时把手贴边建议动态适应屏幕朝向。
   - 后续事项：根据用户使用习惯持续润色动效细节。
-- **Git 提交标识**：`836cb83`
+- **Git 提交标识**：`d9be103`
+---
+
+## [2026-10-18 08:02:00] - Release APK 正式签名构建与 GitHub 开源仓库发布
+
+- **变更摘要**：
+  - **正式签名与 Release 打包体系就绪**：
+    1. 生成正式 RSA 2048-bit 签名密钥库（`release.keystore`，证书有效期 10000 天，已受 `.gitignore` 保护不入库）；
+    2. 在 `app/build.gradle.kts` 中配置 `signingConfigs.release` 并关联至 `buildTypes.release`；
+    3. 成功构建可直接安装与分发的正式 Release APK：`app/build.outputs/apk/release/app-release.apk`（大小 45.8 MB）；
+  - **开源仓库与工程根文档落地**：
+    1. 编写全景根目录 `README.md`，提供 Android 16 / Kotlin / Compose 徽标、能力矩阵、Mermaid 系统架构图、快速构建指南与开发文档索引；
+    2. 落地标准开源协议 `LICENSE`（Apache License 2.0）；
+  - **GitHub 远程仓库与 Release 资产创建发布**：
+    1. 通过 GitHub CLI 成功创建并推送远程公开仓库：`https://github.com/Leonard-china/AIAgentOfAndroid`；
+    2. 创建 GitHub Release 标签 `v1.0.0`，并已将编译打包好的正式 `app-release.apk` 资产上传至 Release 附件供下载：`https://github.com/Leonard-china/AIAgentOfAndroid/releases/tag/v1.0.0`。
+- **修改原因**：
+  - 响应用户关于构建正式 Release APK 与创建对应 GitHub 远程仓库的交付要求。
+- **涉及文件或模块**：
+  - `app/build.gradle.kts`
+  - `README.md`
+  - `LICENSE`
+  - `docs/HANDOFF.md`
+  - `docs/CHANGELOG.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. Release APK 编译：`.\gradlew.bat assembleRelease`；
+    2. 检查输出产物大小与签名状态；
+    3. GitHub 仓库与 Release 发布：通过 `gh repo create` 与 `gh release create` 上传资产。
+  - 真实结果：
+    1. Release APK 编译成功（`BUILD SUCCESSFUL in 2m 52s`，48 项任务执行成功，生成 45.8 MB 正式带签名 APK）；
+    2. GitHub 仓库成功推送（`Leonard-china/AIAgentOfAndroid`）；
+    3. GitHub Release `v1.0.0` 创建成功，APK 资产已在线上可供直接下载。
+- **已知问题与后续事项**：
+  - 已知问题：待收到用户通过 GPT 生成的专业 App 图标后，将图标导入 Android `res/mipmap` 并替换默认启动器图标。
+  - 后续事项：根据用户意图持续扩展或提供更多安装使用支持。
+- **Git 提交标识**：待提交 (本轮提交)
+
 
 
 
