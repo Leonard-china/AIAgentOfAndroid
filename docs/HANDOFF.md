@@ -136,5 +136,5 @@ C:\Users\Leonard\AppData\Local\Android\Sdk\platform-tools\adb.exe shell am start
 ## 5. 当前代码与提交信息
 
 - **当前分支**：`master`
-- **最新提交 Commit**：`a2e6b2a`
-- **最新代码状态**：已集成原生 launch_app 工具组件与受限制设置直达指引，单元测试（18个用例）与 Release 构建均已通过，待部署真机实测。
+- **最新提交 Commit**：`bda090e`
+- **最新代码状态**：已集成 Codex 风格 ScreenActionHud 全局状态条、目标达成校验与看视频多步规划，单元测试（19个用例）与 Release 构建已通过，已全静默安装至真机。
