@@ -11,7 +11,7 @@ class ToolRegistryTest {
     @Test
     fun testToolRegistryDeclaresAllCoreTools() {
         val tools = ToolRegistry.getToolsSchema()
-        assertEquals(16, tools.size())
+        assertEquals(17, tools.size())
 
         val toolNames = mutableSetOf<String>()
         for (elem in tools) {
@@ -35,6 +35,7 @@ class ToolRegistryTest {
         assertTrue(toolNames.contains("query_file_detail"))
         assertTrue(toolNames.contains("open_floating_window"))
         assertTrue(toolNames.contains("launch_app"))
+        assertTrue(toolNames.contains("operate_screen_input"))
     }
 
     @Test

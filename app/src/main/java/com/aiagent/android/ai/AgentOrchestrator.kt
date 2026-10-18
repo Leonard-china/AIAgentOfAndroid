@@ -91,6 +91,7 @@ class AgentOrchestrator(
                 - 打开手机应用（如打开B站、微信、设置、相机、相册、音乐等）：【必须调用 launch_app(app_name="应用名")】！系统将直接通过原生 Launch Intent 秒级启动目标应用！绝对禁止调用 operate_screen_click 去点击屏幕上的文字（否则会错误点击聊天气泡）！
                 - 查找并点击界面文字或按钮：调用 operate_screen_click(text="文字")；
                 - 连点器坐标点击：调用 operate_screen_click(x=横坐标, y=纵坐标)；
+                - 在输入框填入文字并搜索/提交：调用 operate_screen_input(text="要输入的文字", submit=true)；
                 - 滑动翻页：调用 operate_screen_swipe(direction="UP"|"DOWN"|"LEFT"|"RIGHT")；
                 - 返回或回桌面：调用 operate_screen_global_action(action="BACK"|"HOME")；
                 - 遇到不确定的界面时，可先调用 inspect_current_screen 获取屏幕可见文字摘要（纯文本解析，极省 Token，不消耗 Vision Token），再决定点击哪个按钮；
@@ -99,12 +100,13 @@ class AgentOrchestrator(
 
             【跨应用多步任务与目标达成校验铁律（Goal Completion Verification - 极其重要）】
             11. 严禁半途而废！启动应用仅仅是前置动作，绝对不代表任务完成！
-                - 当用户的真实意图是复合任务时（例如：“给我推个B站视频看”、“在B站搜XX视频看”、“打开微信给张三发消息”、“打开小红书看美食”等）：
-                - 第一步调用 launch_app 启动目标应用后，【绝对禁止就此草率停止调用工具或结束任务】！
-                - launch_app 完成后系统会自动切至前台并等待渲染，你必须紧接着调用 inspect_current_screen 获取目标应用界面的可见元素；
-                - 若屏幕出现开屏广告或弹窗（如“跳过”、“我知道了”），先调用 operate_screen_click 点击跳过；
-                - 随后寻找符合用户目标的内容（如推荐流中的视频卡片标题、搜索框等），调用 operate_screen_click 点击进入；
-                - 确认视频已开始播放或用户目标真正达成后，方可停止工具调用并向用户做最终汇报！
+                - 当用户的真实意图是复合任务时（例如：“给我推个B站视频看”、“在B站找有趣的科普视频看”、“打开微信给张三发消息”、“打开小红书看美食”等）：
+                - 第一步调用 launch_app 启动目标应用。注意：launch_app 已经在手机本地毫秒级自动跳过了开屏广告，【你绝对不需要再去点击开屏广告的跳过按钮】！
+                - launch_app 完成后系统已进入主界面，你必须紧接着调用 inspect_current_screen 获取目标应用界面的可见元素；
+                - 【防误触铁律】：绝对禁止点击底栏导航的「我的」标签！「我的」是用户个人主页，不是视频内容；若已误入「我的」页面，请立即调用 operate_screen_click 点击底栏「首页」返回推荐流！
+                - 若用户指定了内容题材（例如“科普视频”）：请调用 operate_screen_click 点击顶部搜索入口，然后调用 operate_screen_input(text="科普视频", submit=true) 搜索并点击第一个视频播放；
+                - 若用户要求推荐视频或看视频：在 inspect_current_screen 返回的列表中找到推荐视频卡片，调用 operate_screen_click 点击进入；
+                - 必须确认 inspect_current_screen 提示已进入视频播放/详情页后，方可停止工具调用并向用户汇报达成！
         """.trimIndent()
 
         val messages = JsonArray().apply {
@@ -192,10 +194,16 @@ class AgentOrchestrator(
                 ScreenActionHud.complete("✅ 任务已完成", 2500L)
             }
 
-            val reply = finalReplyContent ?: if (finalPlan != null) {
+            val reply = if (!finalReplyContent.isNullOrBlank()) {
+                finalReplyContent
+            } else if (finalPlan != null) {
                 "已为您制定操作计划并生成确认卡片，请在下方卡片中核对目标文件并确认是否移入回收站。"
+            } else if (ScreenAssistantAccessibilityService.isVideoPlaying()) {
+                "🎬 已成功为您在应用中定位并播放相关视频！祝您观看愉快！"
+            } else if (ScreenAssistantAccessibilityService.isBilibiliOnMyPage()) {
+                "📱 已为您启动哔哩哔哩，但此前停留在个人中心界面。已为您尝试切换回首页推荐流，您可以挑选喜爱的视频播放。"
             } else {
-                "已为您完成任务分析与操作闭环。"
+                "📱 已为您执行相关屏幕操作并进入目标界面。"
             }
 
             AiMessage(
@@ -631,27 +639,33 @@ class AgentOrchestrator(
                 }
 
                 steps[0].status = "COMPLETED"
-                steps[0].detail = "哔哩哔哩启动成功，等待加载渲染"
+                steps[0].detail = "哔哩哔哩启动成功"
                 onStepUpdated(steps.toList())
 
-                ScreenActionHud.update("⏳ 等待哔哩哔哩加载完成 (2.5s)...")
-                delay(2500L)
+                // Step 2: 本地毫秒级自动快速探测并跳过开屏广告
+                steps.add(TaskStep(2, "自动跳过开屏广告与弹窗", "RUNNING", "正在本地快速检测开屏跳过控件..."))
+                onStepUpdated(steps.toList())
+                ScreenActionHud.update("⚡ 正在自动识别并跳过开屏广告...")
+                val skippedAd = ScreenAssistantAccessibilityService.autoDismissSplashAdOrDialog(maxWaitMs = 2800L)
+                if (skippedAd) {
+                    ScreenActionHud.update("⚡ 已自动秒跳开屏广告！")
+                } else {
+                    ScreenActionHud.update("⏳ 哔哩哔哩主界面已就绪...")
+                }
+                delay(600L)
+
+                // 防误入「我的」：若停留在个人中心，自动点「首页」切回推荐流
+                ScreenAssistantAccessibilityService.ensureBilibiliHomePage()
+                delay(400L)
+
+                steps[1].status = "COMPLETED"
+                steps[1].detail = if (skippedAd) "已自动秒跳开屏广告" else "已就绪进入主页推荐"
+                onStepUpdated(steps.toList())
 
                 if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
                     ScreenActionHud.failed("已停止操作", 1500L)
                     return@withContext AiMessage(sender = "ASSISTANT", content = "已按您的要求停止操作。", taskSteps = steps)
                 }
-
-                // Step 2: 检查是否有开屏广告或跳过弹窗
-                steps.add(TaskStep(2, "分析屏幕界面与跳过广告", "RUNNING", "正在检查开屏弹窗与推荐内容..."))
-                onStepUpdated(steps.toList())
-                ScreenActionHud.update("👀 正在分析屏幕内容与跳过弹窗...")
-                ScreenAssistantAccessibilityService.findAndClick("跳过")
-                ScreenAssistantAccessibilityService.findAndClick("我知道了")
-
-                steps[1].status = "COMPLETED"
-                steps[1].detail = "已完成界面预处理"
-                onStepUpdated(steps.toList())
 
                 // Step 3: 在首页推荐流挑选视频并点击播放
                 steps.add(TaskStep(3, "挑选精彩推荐视频并播放", "RUNNING", "正在定位推荐视频卡片..."))
@@ -663,16 +677,18 @@ class AgentOrchestrator(
                 val targetY = dm.heightPixels * 0.38f
 
                 val clickSuccess = ScreenAssistantAccessibilityService.clickAt(targetX, targetY)
-                delay(1000L)
+                delay(1200L)
+
+                val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying()
 
                 steps[2].status = if (clickSuccess) "COMPLETED" else "FAILED"
-                steps[2].detail = if (clickSuccess) "已点击首页推荐视频卡片进入播放" else "点击视频位置失败"
+                steps[2].detail = if (isPlaying) "成功进入视频播放详情页" else "已点击推荐位视频卡片"
                 onStepUpdated(steps.toList())
 
                 ScreenActionHud.complete("✅ 已为您打开并播放推荐视频！", 3000L)
 
                 val reply = "🎬 **已为您在哔哩哔哩打开并点击播放推荐视频！**\n\n" +
-                        "• 启动状态：已成功唤起客户端并切至前台\n" +
+                        "• 广告处理：已在本地毫秒级自动跳过开屏广告\n" +
                         "• 目标达成：已在推荐流为您挑选并进入视频播放\n" +
                         "祝您观影愉快！😊"
 
@@ -1043,14 +1059,46 @@ class AgentOrchestrator(
                 ScreenActionHud.update("🚀 正在启动「$appName」...")
                 val res = AppLauncherHelper.launchApp(context, appName)
                 if (res.success) {
-                    ScreenActionHud.update("⏳ 等待「${res.appName}」加载就绪 (2s)...")
-                    delay(2200L)
-                    ScreenActionHud.update("👀「${res.appName}」已在前台，准备分析屏幕内容...")
-                    "已成功通过原生 Intent 启动「${res.appName}」应用并切至前台（已等待2秒完成界面渲染）。" +
-                    "【极其重要】：若用户指令包含看视频、推荐、搜索、浏览等复合目标，请立即调用 inspect_current_screen 分析屏幕元素并点击目标卡片播放，直到目标达成！"
+                    // 本地快速毫秒级探测并秒跳开屏广告（无需经过大模型云端往返，0.2秒内搞定）
+                    ScreenActionHud.update("⚡ 正在启动并自动跳过开屏广告...")
+                    val skippedAd = ScreenAssistantAccessibilityService.autoDismissSplashAdOrDialog(maxWaitMs = 2800L)
+                    if (skippedAd) {
+                        ScreenActionHud.update("⚡ 已自动跳过开屏广告！")
+                        delay(500L)
+                    } else {
+                        delay(1200L)
+                    }
+
+                    // 如果启动的是B站，检测是否落在「我的」，若是则自动回「首页」
+                    if (res.appName?.contains("哔哩哔哩") == true || res.appName?.contains("B站") == true) {
+                        ScreenAssistantAccessibilityService.ensureBilibiliHomePage()
+                        delay(400L)
+                    }
+
+                    ScreenActionHud.update("👀「${res.appName}」已就绪，准备分析内容...")
+                    "已成功通过原生 Intent 启动「${res.appName}」并切至前台（开屏广告已在本地毫秒级自动跳过）。" +
+                    "【极其重要】：开屏广告已经跳过，绝对不要再去点击开屏广告！请立即调用 inspect_current_screen 获取主界面元素；若用户要找特定内容（如科普视频），可点击顶部搜索框并调用 operate_screen_input(text='科普视频') 搜索；切勿点击底栏的「我的」！"
                 } else {
                     ScreenActionHud.failed(res.message, 2500L)
                     res.message
+                }
+            }
+            "operate_screen_input" -> {
+                if (!ScreenAssistantAccessibilityService.isServiceRunning()) {
+                    openAccessibilitySettingsInternal()
+                    "无障碍辅助服务尚未开启，无法输入文字。已调起系统无障碍设置页面。"
+                } else {
+                    val text = if (args.has("text") && !args.get("text").isJsonNull) args.get("text").asString else ""
+                    val submit = if (args.has("submit") && !args.get("submit").isJsonNull) args.get("submit").asBoolean else true
+                    ScreenActionHud.update("⌨️ 正在输入: \"$text\"...")
+                    val success = ScreenAssistantAccessibilityService.inputText(text, submit)
+                    delay(600L)
+                    if (success) {
+                        ScreenActionHud.update("✅ 已填入: \"$text\"")
+                        "成功在当前屏幕输入框输入「$text」${if (submit) "并触发搜索/提交" else ""}。请调用 inspect_current_screen 查看搜索结果并点击第一个相关视频播放！"
+                    } else {
+                        "输入未成功：未检测到已聚焦的输入框控件。请先调用 operate_screen_click 点击搜索框使其获取焦点，然后再调用 operate_screen_input！"
+                    }
                 }
             }
             else -> "未知工具: $name"

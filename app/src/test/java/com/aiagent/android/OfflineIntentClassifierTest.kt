@@ -63,6 +63,7 @@ class OfflineIntentClassifierTest {
         assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("帮我推荐一个视频看"))
         assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("在B站看视频"))
         assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("刷视频"))
+        assertEquals(OfflineIntent.RECOMMEND_VIDEO, OfflineIntentClassifier.classify("打开B站并为我找一个有趣的科普视频"))
     }
 
     @Test

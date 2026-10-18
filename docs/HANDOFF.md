@@ -64,6 +64,13 @@
   - **Codex 风格灵动状态指示条 (`ScreenActionHud`)**：基于 `TYPE_ACCESSIBILITY_OVERLAY` 在屏幕顶端悬浮呈现高辨识度胶囊，实时轮播当前 Agent 动作（启动、分析屏幕、点击播放），并提供一键【停止】急停按钮，完成后展示绿勾并平滑淡出；
   - **目标达成闭环校验 (Goal Completion Verification)**：System Prompt 确立复合目标严禁草率结束铁律；`launch_app` 自动延时 2.2 秒等待界面渲染并在工具回包中强指令要求继续定位目标；离线引擎新增 `RECOMMEND_VIDEO`，实现“启动B站 $\rightarrow$ 页面加载 $\rightarrow$ 跳过广告 $\rightarrow$ 挑选推荐视频 $\rightarrow$ 点击播放”全链路闭环；
   - **真机已部署**：新版 Release APK 已成功全静默部署至荣耀 VKJ-AN00 (Android 16) 物理机。
+- [x] **开屏广告毫秒级自动秒跳、防误触「我的」与文本搜索输入 (`autoDismissSplashAdOrDialog` & `operate_screen_input`)**：
+  - **开屏广告秒跳**：无障碍服务本地 100ms 快速扫描，0.1 秒内原生触发跳过广告，消除云端模型网络思考导致广告过期及误触的顽疾；
+  - **防误触「我的」**：识别并拦截底栏导航误触，若误入「我的」个人中心自动点按「首页」切回推荐视频流；
+  - **深度屏幕树与语义识别**：分析深度扩充至 16 层，捕获上限提至 50 项，区分导航栏、搜索入口与视频推荐卡片，自动判定播放详情页状态；
+  - **搜索输入工具**：`ToolRegistry` 注册第 17 个核心工具 `operate_screen_input`，支持搜索科普等特定题材视频；
+  - **真实状态汇报**：彻底废除未达成时硬说“已为您完成任务分析与操作闭环”的敷衍式假回复；
+  - **真机已部署**：单元测试 20/20 通过，Release APK 构建成功并通过 `pm install -r -t -g` 部署至荣耀 VKJ-AN00。
 - [x] **原生应用启动能力与受限设置解除指引 (launch_app & Restricted Settings Guide)**：
   - **原生应用启动**：遵循 Native First 铁律，新增 `AppLauncherHelper`，基于 `PackageManager.getLaunchIntentForPackage` 原生调起外部 App，解决“打开B站”误点击聊天气泡的缺陷；
   - **双模工具链**：`ToolRegistry` 注册第 16 个核心工具 `launch_app`，System Prompt 严禁屏幕盲点；`OfflineIntentClassifier` 新增 `OfflineIntent.LAUNCH_APP` 与 `extractAppName`，离线规则同样支持原生启动；

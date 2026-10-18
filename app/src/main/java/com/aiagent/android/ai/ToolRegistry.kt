@@ -233,7 +233,7 @@ object ToolRegistry {
         // 16. launch_app
         tools.add(createToolFunction(
             name = "launch_app",
-            description = "【原生启动】在手机上直接启动指定的已安装应用程序（例如：B站/哔哩哔哩、微信、支付宝、相册、相机、设置、抖音、音乐等）。优先通过原生 Intent 秒级调起应用，严禁使用屏幕点击去瞎点聊天界面的文字！",
+            description = "【原生启动】在手机上直接启动指定的已安装应用程序（例如：B站/哔哩哔哩、微信、支付宝、相册、相机、设置、抖音、音乐等）。优先通过原生 Intent 秒级调起应用，并在本地毫秒级自动跳过开屏广告！严禁使用屏幕点击去瞎点聊天界面的文字！",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
                 val props = JsonObject().apply {
@@ -245,6 +245,30 @@ object ToolRegistry {
                 }
                 add("properties", props)
                 val required = JsonArray().apply { add("app_name") }
+                add("required", required)
+            }
+        ))
+
+        // 17. operate_screen_input
+        tools.add(createToolFunction(
+            name = "operate_screen_input",
+            description = "模拟文本输入操作：在当前屏幕的输入框（如搜索栏、聊天消息输入框）中自动填入文字，支持可选自动点击搜索/提交确认",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val textProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "要输入的文字内容（例如搜索关键词、消息文本等）")
+                    }
+                    val submitProp = JsonObject().apply {
+                        addProperty("type", "boolean")
+                        addProperty("description", "输入后是否自动点击搜索或确定提交（默认 true）")
+                    }
+                    add("text", textProp)
+                    add("submit", submitProp)
+                }
+                add("properties", props)
+                val required = JsonArray().apply { add("text") }
                 add("required", required)
             }
         ))

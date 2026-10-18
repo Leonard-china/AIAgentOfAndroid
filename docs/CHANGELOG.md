@@ -489,6 +489,52 @@
 - **已知问题与后续事项**：
   - 用户可在真机上输入“给我推个B站视频看”进行全链路端到端实测。
 - **Git 提交标识**：`bda090e`
+---
+
+## [2026-10-18 10:30:00] - 本地毫秒级开屏广告自动秒跳、防误触「我的」个人中心、深层屏幕分析与搜索输入工具落地
+
+- **变更摘要**：
+  - **开屏广告本地毫秒级自动秒跳 (`autoDismissSplashAdOrDialog`)**：
+    - 根治“调用大模型思考时间过长（3~6秒）导致开屏广告自动关闭、进而错点到主页面下方控件”的顽疾；
+    - 在 `ScreenAssistantAccessibilityService` 中引入本地 100ms 轮询检测，凡匹配“跳过广告/跳过/关闭广告/Skip/我知道了”等，0.1 秒内由无障碍服务本地原生触发点击跳过；
+    - `launch_app` 工具在原生启动后立即在本地完成开屏秒跳，HUD 实时反馈 `⚡ 已自动跳过开屏广告！`，确保交还给编排层与大模型时目标应用已 100% 处于干净的主界面，无需大模型再次云端决策跳过。
+  - **防误触「我的」个人中心与自动回正 (`ensureBilibiliHomePage`)**：
+    - 针对因历史点击或广告关闭后误入 B 站底栏「我的」个人空间导致停滞的问题，在无障碍服务中加入页面状态特征识别（检测是否在「我的」）；
+    - 若检测到处于「我的」个人中心，自动点按「首页」导航标签切回推荐信息流；
+    - 在 System Prompt 与元素摘要中加入硬性防误触标记：明确标注底栏「我的」为个人中心，严禁作为视频内容点击。
+  - **深层屏幕元素树提取与播放状态判定 (`inspectScreenSummary`)**：
+    - 递归遍历深度由 8 层扩展至 16 层，元素捕获上限提高至 50 项，彻底解决深层 RecyclerView/ViewPager 推荐流中视频卡片标题被截断不可见的缺陷；
+    - 元素智能语义标注：准确区分 `[底栏导航: ...]`、`[搜索入口: ...]`、`[推荐视频卡片: ...]`；
+    - 状态自动判定：检测到“弹幕/倍速/清晰度/点赞/投币/全屏”特征时，自动在摘要中注入 `🎬【状态判定】：检测到屏幕正处于视频播放详情页！`，赋能编排层精准判定目标达成。
+  - **新增屏幕文本输入与搜索工具 (`operate_screen_input`)**：
+    - `ToolRegistry` 注册第 17 个核心工具 `operate_screen_input(text, submit)`；
+    - 支持自动获取当前界面输入框焦点，利用 `AccessibilityNodeInfo.ACTION_SET_TEXT` 输入关键词（如“科普视频”），并可选自动触发“搜索/确定”提交，完美支持精准题材搜索播放需求。
+  - **彻底移除敷衍式虚假回复与状态兜底真实化**：
+    - 彻底废除未经确认便显示 `"已为您完成任务分析与操作闭环。"` 的静态兜底；
+    - 编排层通过 `isVideoPlaying()` 真实检测播放状态，达成时汇报观影提示，未达成或停留在主页时诚实汇报当前停滞界面并指导操作。
+- **修改原因**：
+  - 用户真机实测发现：“打开B站后要点击广告跳过按钮时，思考时间太久，广告直接自己关了，然后它就点到了我的个人首页，然后他就停了”。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/screen/ScreenAssistantAccessibilityService.kt`
+  - `app/src/main/java/com/aiagent/android/ai/ToolRegistry.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/test/java/com/aiagent/android/OfflineIntentClassifierTest.kt`
+  - `app/src/test/java/com/aiagent/android/ToolRegistryTest.kt`
+  - `docs/CHANGELOG.md`
+  - `docs/HANDOFF.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. Release APK 构建：`.\gradlew.bat assembleRelease`；
+    3. 真机部署：`adb push` + `pm install -r -t -g` 至荣耀 VKJ-AN00 (Android 16, serial: `AXRBUT6520002413`)。
+  - 真实结果：
+    1. 单元测试全量通过：6 个测试类、20 个测试用例全部通过（0 失败）；
+    2. Release APK 构建成功（耗时 25s，大小 45.9 MB）；
+    3. 真机静默覆盖安装成功（`Success`），服务处于激活状态，主程序前台拉起就绪。
+- **已知问题与后续事项**：
+  - 指导用户在手机上重新测试“打开B站并为我找一个有趣的科普视频”及“推个B站视频看”。
+- **Git 提交标识**：待提交
+---
 
 
 
