@@ -273,6 +273,55 @@ object ToolRegistry {
             }
         ))
 
+        // 18. save_long_term_memory
+        tools.add(createToolFunction(
+            name = "save_long_term_memory",
+            description = "在手机硬件加密库中永久记住用户的长时信息（如手机号码、密码、个人称呼、使用偏好等）。即使开启新对话也永久保留！",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val keyProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "记忆键名，例如：'phone'(手机号)、'password'(密码)、'nickname'(称呼)、'pref_video'(偏好题材)")
+                    }
+                    val valProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "要永久记住的信息或偏好内容（本地 AES-256 硬件加密保存）")
+                    }
+                    val lblProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "可读说明标签，例如：'我的手机号'、'登录密码'、'喜欢的科普UP主'")
+                    }
+                    add("key", keyProp)
+                    add("value", valProp)
+                    add("label", lblProp)
+                }
+                add("properties", props)
+                val required = JsonArray().apply {
+                    add("key")
+                    add("value")
+                }
+                add("required", required)
+            }
+        ))
+
+        // 19. recall_long_term_memory
+        tools.add(createToolFunction(
+            name = "recall_long_term_memory",
+            description = "读取已加密保存的用户长时记忆（如取回手机号或密码用于在当前屏幕自动输入）",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                val props = JsonObject().apply {
+                    val keyProp = JsonObject().apply {
+                        addProperty("type", "string")
+                        addProperty("description", "要查询的键名，例如：'phone'、'password'，留空则返回所有已存记忆条目")
+                    }
+                    add("key", keyProp)
+                }
+                add("properties", props)
+            }
+        ))
+
         return tools
     }
 

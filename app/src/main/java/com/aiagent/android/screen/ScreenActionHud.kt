@@ -88,6 +88,144 @@ object ScreenActionHud {
     }
 
     /**
+     * 在操作任务结束或有重要说明时，在屏幕顶端弹出像信息/通知一样的交互横幅。
+     * 用户点击横幅或“继续交流”按钮，即可立即在当前页面（如B站）就地唤起桌面悬浮窗，继续与 AI 交流！
+     */
+    fun showCompletionBanner(
+        context: Context,
+        title: String = "AI 智能管家",
+        message: String,
+        autoDismissMs: Long = 8000L,
+        onOpenChat: () -> Unit
+    ) {
+        mainHandler.post {
+            dismiss()
+
+            val svc = ScreenAssistantAccessibilityService.instance
+            val targetContext = svc ?: context.applicationContext
+            val wm = (targetContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@post
+            windowManager = wm
+
+            val windowType = if (svc != null) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Settings.canDrawOverlays(targetContext)) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                return@post
+            }
+
+            val dm = targetContext.resources.displayMetrics
+            val bannerWidth = (dm.widthPixels * 0.94f).toInt()
+
+            val banner = LinearLayout(targetContext).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                val hPad = dpToPx(targetContext, 14f).toInt()
+                val vPad = dpToPx(targetContext, 10f).toInt()
+                setPadding(hPad, vPad, hPad, vPad)
+
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dpToPx(targetContext, 18f)
+                    setColor(Color.parseColor("#F4121622")) // 95% 墨黑毛玻璃
+                    setStroke(dpToPx(targetContext, 1.2f).toInt(), Color.parseColor("#5076A0F8")) // 微蓝光泽边框
+                }
+
+                // 点击整个横幅触发就地唤起悬浮窗交流
+                setOnClickListener {
+                    dismiss()
+                    onOpenChat()
+                }
+            }
+
+            // 1. 左侧圆形图标
+            val iconView = TextView(targetContext).apply {
+                text = "🤖"
+                textSize = 18f
+                gravity = Gravity.CENTER
+                val size = dpToPx(targetContext, 34f).toInt()
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    marginEnd = dpToPx(targetContext, 10f).toInt()
+                }
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#263855"))
+                }
+            }
+            banner.addView(iconView)
+
+            // 2. 中间两行文字（标题 + 摘要内容）
+            val textBox = LinearLayout(targetContext).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val titleView = TextView(targetContext).apply {
+                text = title
+                setTextColor(Color.parseColor("#FFFFFF"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            val msgView = TextView(targetContext).apply {
+                text = message
+                setTextColor(Color.parseColor("#CBD5E1"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(0, dpToPx(targetContext, 2f).toInt(), 0, 0)
+            }
+            textBox.addView(titleView)
+            textBox.addView(msgView)
+            banner.addView(textBox)
+
+            // 3. 右侧“💬 继续交流”按钮
+            val chatBtn = TextView(targetContext).apply {
+                text = "💬 继续交流"
+                setTextColor(Color.parseColor("#8AB4F8"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                val btnHPad = dpToPx(targetContext, 9f).toInt()
+                val btnVPad = dpToPx(targetContext, 5f).toInt()
+                setPadding(btnHPad, btnVPad, btnHPad, btnVPad)
+                val mStart = dpToPx(targetContext, 8f).toInt()
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = mStart
+                }
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dpToPx(targetContext, 12f)
+                    setColor(Color.parseColor("#204A85"))
+                    setStroke(dpToPx(targetContext, 0.8f).toInt(), Color.parseColor("#508AB4F8"))
+                }
+            }
+            banner.addView(chatBtn)
+
+            hudView = banner
+
+            val params = WindowManager.LayoutParams(
+                bannerWidth,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                windowType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = dpToPx(targetContext, 48f).toInt()
+            }
+
+            try {
+                wm.addView(banner, params)
+                val dismissTask = Runnable { dismiss() }
+                autoDismissRunnable = dismissTask
+                mainHandler.postDelayed(dismissTask, autoDismissMs)
+            } catch (_: Exception) {
+                hudView = null
+                windowManager = null
+            }
+        }
+    }
+
+    /**
      * 标记任务中止或失败。
      */
     fun failed(message: String, autoDismissDelayMs: Long = 2500L) {

@@ -132,3 +132,14 @@ fun formatBytes(bytes: Long): String {
     val df = java.text.DecimalFormat("#,##0.#")
     return "${df.format(bytes / Math.pow(1024.0, digitGroups.toDouble()))} ${units[digitGroups]}"
 }
+
+/**
+ * 跨会话永久长时记忆数据模型（开新对话亦不丢失，硬件加密保护）
+ */
+data class UserMemoryItem(
+    val key: String,         // 唯一键名，如 "phone", "password", "nickname", "pref_topic"
+    val value: String,       // 加密存储的具体内容，如 "13800000000"
+    val label: String,       // 人类可读标签，如 "手机号码", "登录密码", "常用偏好"
+    val updatedTime: Long = System.currentTimeMillis()
+)
+

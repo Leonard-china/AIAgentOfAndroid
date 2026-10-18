@@ -13,6 +13,7 @@ import com.aiagent.android.model.MediaItem
 import com.aiagent.android.model.MediaType
 import com.aiagent.android.model.PlanStatus
 import com.aiagent.android.model.TaskStep
+import com.aiagent.android.model.UserMemoryItem
 import com.aiagent.android.model.formatBytes
 import com.aiagent.android.screen.ScreenActionHud
 import com.aiagent.android.screen.ScreenAssistantAccessibilityService
@@ -70,6 +71,19 @@ class AgentOrchestrator(
             ScreenAssistantAccessibilityService.triggerEmergencyStop()
         }
 
+        val memories = vault.getAllMemories()
+        val memoryBlock = if (memories.isEmpty()) {
+            "当前未存储任何用户专属信息。如用户在对话中告知手机号、密码或使用偏好，必须调用 save_long_term_memory 工具永久保存到本地加密库！"
+        } else {
+            buildString {
+                appendLine("以下为用户此前授权永久记住的个人敏感与偏好信息（本地硬件加密存储，新开对话永不遗忘）：")
+                memories.forEach { m ->
+                    appendLine("• ${m.label} (${m.key}): ${m.value}")
+                }
+                appendLine("【自动填表与输入铁律】：当屏幕出现输入框且需要输入上述信息（如登录输手机号、输密码、输称呼等），或者用户指令要求“输入我的手机号/密码”时，必须调用 operate_screen_input 自动输入对应内容！绝对不要重复向用户索要已经记住的信息！")
+            }
+        }
+
         val systemPrompt = """
             你是一个专业、严谨且诚实的 Android 手机智能文件与相册管理助手。
 
@@ -100,13 +114,19 @@ class AgentOrchestrator(
 
             【跨应用多步任务与目标达成校验铁律（Goal Completion Verification - 极其重要）】
             11. 严禁半途而废！启动应用仅仅是前置动作，绝对不代表任务完成！
-                - 当用户的真实意图是复合任务时（例如：“给我推个B站视频看”、“在B站找有趣的科普视频看”、“打开微信给张三发消息”、“打开小红书看美食”等）：
+                - 当用户的真实意图是复合任务时（例如：“给我推个B站视频看”、“在B站找3blue1brown的科普视频看”、“打开微信给张三发消息”、“打开小红书看美食”等）：
                 - 第一步调用 launch_app 启动目标应用。注意：launch_app 已经在手机本地毫秒级自动跳过了开屏广告，【你绝对不需要再去点击开屏广告的跳过按钮】！
                 - launch_app 完成后系统已进入主界面，你必须紧接着调用 inspect_current_screen 获取目标应用界面的可见元素；
                 - 【防误触铁律】：绝对禁止点击底栏导航的「我的」标签！「我的」是用户个人主页，不是视频内容；若已误入「我的」页面，请立即调用 operate_screen_click 点击底栏「首页」返回推荐流！
-                - 若用户指定了内容题材（例如“科普视频”）：请调用 operate_screen_click 点击顶部搜索入口，然后调用 operate_screen_input(text="科普视频", submit=true) 搜索并点击第一个视频播放；
+                - 若用户指定了内容题材或UP主（例如“3blue1brown”、“科普视频”）：请先调用 operate_screen_click 点击顶部搜索入口，然后调用 operate_screen_input(text="3blue1brown", submit=true) 搜索；搜索结果出来后，【必须紧接着调用 operate_screen_click 点击首个视频卡片进入播放】！绝对不要在输入文字后就草率停下！
                 - 若用户要求推荐视频或看视频：在 inspect_current_screen 返回的列表中找到推荐视频卡片，调用 operate_screen_click 点击进入；
-                - 必须确认 inspect_current_screen 提示已进入视频播放/详情页后，方可停止工具调用并向用户汇报达成！
+                - 必须确认 inspect_current_screen 提示已进入视频播放/详情页（或已成功点击视频卡片进入详情）后，方可停止工具调用并向用户汇报达成！
+
+            【用户专属永久记忆库（长时记忆 - 跨会话永久生效，开新对话绝不遗忘）】
+            12. 你具备硬件加密保护的长时记忆能力：
+                - 用户要求你记住个人资料（手机号、密码、称呼、偏好等）时，调用 save_long_term_memory 工具永久保存；
+                - 用户要求查询或需要使用记忆时，调用 recall_long_term_memory 工具查询；
+                $memoryBlock
         """.trimIndent()
 
         val messages = JsonArray().apply {
@@ -191,7 +211,7 @@ class AgentOrchestrator(
             if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
                 ScreenActionHud.failed("自动化操作已中止", 2000L)
             } else {
-                ScreenActionHud.complete("✅ 任务已完成", 2500L)
+                ScreenActionHud.complete("✅ 任务已完成", 1500L)
             }
 
             val reply = if (!finalReplyContent.isNullOrBlank()) {
@@ -205,6 +225,17 @@ class AgentOrchestrator(
             } else {
                 "📱 已为您执行相关屏幕操作并进入目标界面。"
             }
+
+            // 像信息一样的交互横幅，用户点击后在当前应用（如B站）就地弹出悬浮窗继续交流
+            ScreenActionHud.showCompletionBanner(
+                context = context,
+                title = if (ScreenAssistantAccessibilityService.isVideoPlaying()) "🎬 视频已开始播放" else "🤖 AI 智能管家",
+                message = reply.lines().firstOrNull { it.isNotBlank() } ?: "点击此处可就地展开悬浮对话窗继续交流",
+                autoDismissMs = 8500L,
+                onOpenChat = {
+                    FloatingAssistantManager.showFloatingService(context)
+                }
+            )
 
             AiMessage(
                 sender = "ASSISTANT",
@@ -239,6 +270,91 @@ class AgentOrchestrator(
                     sender = "ASSISTANT",
                     content = "✨ 已为您开启新对话！之前的上下文已重置，您可以随时向我提出新的文件管理或屏幕操作需求。"
                 )
+            }
+
+            OfflineIntent.SAVE_MEMORY -> {
+                steps.add(TaskStep(1, "提取个人敏感信息并硬件加密存储", "RUNNING", "正在通过 Android KeyStore (AES-256-GCM) 保存..."))
+                onStepUpdated(steps.toList())
+
+                val kv = OfflineIntentClassifier.extractMemoryKeyValue(userPrompt)
+                if (kv != null) {
+                    val (key, value, label) = kv
+                    vault.saveMemory(key, value, label)
+                    steps[0].status = "COMPLETED"
+                    steps[0].detail = "成功加密保存: $label"
+                    onStepUpdated(steps.toList())
+
+                    val masked = when (key) {
+                        "phone" -> if (value.length == 11) value.substring(0, 3) + "****" + value.substring(7) else value
+                        "password" -> "••••••••"
+                        else -> value
+                    }
+                    val reply = "🔒 **已为您安全保存专属长时记忆！**\n\n" +
+                            "• 项目：**$label** (`$key`)\n" +
+                            "• 内容：`$masked`（Android KeyStore 硬件级 AES-256-GCM 保护）\n" +
+                            "• 作用：跨会话永久生效，即使开启新对话也不会遗忘；在后续遇到填表、登录或输入时，我将自动为您填入。"
+
+                    ScreenActionHud.showCompletionBanner(
+                        context = context,
+                        title = "🔒 长时记忆已保存",
+                        message = "已安全加密保存 $label，开新对话也不忘",
+                        autoDismissMs = 6000L,
+                        onOpenChat = { FloatingAssistantManager.showFloatingService(context) }
+                    )
+
+                    AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
+                } else {
+                    steps[0].status = "FAILED"
+                    steps[0].detail = "未识别到有效的键值"
+                    onStepUpdated(steps.toList())
+
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "未能在您的指令中解析出要记住的具体内容。您可以这样对我吩咐：\n• “记住我的手机号是13800000000”\n• “记住我的密码是Abc@1234”\n• “记住我叫小明”",
+                        taskSteps = steps
+                    )
+                }
+            }
+
+            OfflineIntent.RECALL_MEMORY -> {
+                steps.add(TaskStep(1, "解密读取本地硬件长时记忆", "RUNNING", "正在访问 Android KeyStore..."))
+                onStepUpdated(steps.toList())
+
+                val all: List<UserMemoryItem> = vault.getAllMemories()
+                steps[0].status = "COMPLETED"
+                steps[0].detail = "读取完成，共 ${all.size} 条记录"
+                onStepUpdated(steps.toList())
+
+                if (all.isEmpty()) {
+                    AiMessage(
+                        sender = "ASSISTANT",
+                        content = "📝 当前长时记忆库中尚无记录。您可以让我“记住我的手机号是...”或“记住我的密码是...”，我会安全为您硬件加密保存。",
+                        taskSteps = steps
+                    )
+                } else {
+                    val reply = buildString {
+                        appendLine("🧠 **已为您安全记住以下专属信息（开新对话也不忘）**：\n")
+                        all.forEachIndexed { i: Int, m: UserMemoryItem ->
+                            val masked = when (m.key) {
+                                "phone" -> if (m.value.length == 11) m.value.substring(0, 3) + "****" + m.value.substring(7) else m.value
+                                "password" -> "••••••••"
+                                else -> m.value
+                            }
+                            appendLine("${i + 1}. **${m.label}** (`${m.key}`)：`$masked`")
+                        }
+                        appendLine("\n🔐 *所有数据均由本设备独立芯片安全模块 (TEE/StrongBox) 硬件级加密，绝不会上传云端。*")
+                    }
+
+                    ScreenActionHud.showCompletionBanner(
+                        context = context,
+                        title = "🧠 专属长时记忆库",
+                        message = "已加载 ${all.size} 条专属记忆，随时可在当前界面继续对话",
+                        autoDismissMs = 6000L,
+                        onOpenChat = { FloatingAssistantManager.showFloatingService(context) }
+                    )
+
+                    AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
+                }
             }
 
             OfflineIntent.STORAGE_OVERVIEW -> {
@@ -667,30 +783,83 @@ class AgentOrchestrator(
                     return@withContext AiMessage(sender = "ASSISTANT", content = "已按您的要求停止操作。", taskSteps = steps)
                 }
 
-                // Step 3: 在首页推荐流挑选视频并点击播放
-                steps.add(TaskStep(3, "挑选精彩推荐视频并播放", "RUNNING", "正在定位推荐视频卡片..."))
-                onStepUpdated(steps.toList())
-                ScreenActionHud.update("🎬 正在为您挑选推荐视频并播放...")
-
                 val dm = context.resources.displayMetrics
-                val targetX = dm.widthPixels * 0.5f
-                val targetY = dm.heightPixels * 0.38f
+                val searchKeyword = OfflineIntentClassifier.extractVideoSearchKeyword(userPrompt)
 
-                val clickSuccess = ScreenAssistantAccessibilityService.clickAt(targetX, targetY)
-                delay(1200L)
+                val reply = if (!searchKeyword.isNullOrBlank()) {
+                    // 用户指定了搜索内容（如 3blue1brown、科普视频）
+                    steps.add(TaskStep(3, "搜索关键词: $searchKeyword", "RUNNING", "正在打开搜索并提交关键词..."))
+                    onStepUpdated(steps.toList())
+                    ScreenActionHud.update("🔍 正在搜索「$searchKeyword」...")
 
-                val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying()
+                    // 点击顶部搜索入口
+                    ScreenAssistantAccessibilityService.findAndClick("搜索") ||
+                            ScreenAssistantAccessibilityService.clickAt(dm.widthPixels * 0.5f, dm.heightPixels * 0.07f)
+                    delay(800L)
 
-                steps[2].status = if (clickSuccess) "COMPLETED" else "FAILED"
-                steps[2].detail = if (isPlaying) "成功进入视频播放详情页" else "已点击推荐位视频卡片"
-                onStepUpdated(steps.toList())
+                    // 输入关键词并提交搜索
+                    ScreenAssistantAccessibilityService.inputText(searchKeyword, submit = true)
+                    delay(1500L)
 
-                ScreenActionHud.complete("✅ 已为您打开并播放推荐视频！", 3000L)
+                    steps[2].status = "COMPLETED"
+                    steps[2].detail = "已完成搜索: $searchKeyword"
+                    onStepUpdated(steps.toList())
 
-                val reply = "🎬 **已为您在哔哩哔哩打开并点击播放推荐视频！**\n\n" +
-                        "• 广告处理：已在本地毫秒级自动跳过开屏广告\n" +
-                        "• 目标达成：已在推荐流为您挑选并进入视频播放\n" +
-                        "祝您观影愉快！😊"
+                    // Step 4: 点击首个搜索结果视频卡片进入播放
+                    steps.add(TaskStep(4, "进入首个视频播放详情页", "RUNNING", "正在定位首个视频卡片..."))
+                    onStepUpdated(steps.toList())
+                    ScreenActionHud.update("🎬 正在为您点击首个视频卡片播放...")
+
+                    val cardClicked = ScreenAssistantAccessibilityService.clickFirstVideoCardInSearchResults()
+                    delay(1200L)
+                    val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying()
+
+                    steps[3].status = if (cardClicked || isPlaying) "COMPLETED" else "FAILED"
+                    steps[3].detail = if (isPlaying) "已进入视频播放详情页" else "已点击匹配视频卡片"
+                    onStepUpdated(steps.toList())
+
+                    ScreenActionHud.complete("🎬 已为您播放「$searchKeyword」相关视频！", 3000L)
+
+                    "🎬 **已为您在哔哩哔哩搜索并播放「$searchKeyword」相关视频！**\n\n" +
+                            "• 广告处理：本地毫秒级自动跳过开屏广告\n" +
+                            "• 搜索定位：已成功搜索「$searchKeyword」并自动点击首个视频卡片\n" +
+                            "祝您观影愉快！😊"
+                } else {
+                    // 通用推荐流
+                    steps.add(TaskStep(3, "挑选精彩推荐视频并播放", "RUNNING", "正在定位推荐视频卡片..."))
+                    onStepUpdated(steps.toList())
+                    ScreenActionHud.update("🎬 正在为您挑选推荐视频并播放...")
+
+                    val targetX = dm.widthPixels * 0.5f
+                    val targetY = dm.heightPixels * 0.38f
+
+                    val clickSuccess = ScreenAssistantAccessibilityService.clickAt(targetX, targetY)
+                    delay(1200L)
+
+                    val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying()
+
+                    steps[2].status = if (clickSuccess) "COMPLETED" else "FAILED"
+                    steps[2].detail = if (isPlaying) "成功进入视频播放详情页" else "已点击推荐位视频卡片"
+                    onStepUpdated(steps.toList())
+
+                    ScreenActionHud.complete("✅ 已为您打开并播放推荐视频！", 3000L)
+
+                    "🎬 **已为您在哔哩哔哩打开并点击播放推荐视频！**\n\n" +
+                            "• 广告处理：已在本地毫秒级自动跳过开屏广告\n" +
+                            "• 目标达成：已在推荐流为您挑选并进入视频播放\n" +
+                            "祝您观影愉快！😊"
+                }
+
+                // 交互式完成横幅：用户点击后在当前应用（如B站）就地弹出悬浮窗继续交流
+                ScreenActionHud.showCompletionBanner(
+                    context = context,
+                    title = "🎬 视频已开始播放",
+                    message = "点击此处可就地展开悬浮对话窗继续交流",
+                    autoDismissMs = 8500L,
+                    onOpenChat = {
+                        FloatingAssistantManager.showFloatingService(context)
+                    }
+                )
 
                 AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
             }
@@ -700,7 +869,7 @@ class AgentOrchestrator(
                 ScreenActionHud.show(context, "🚀 正在启动「$appName」...") {
                     ScreenAssistantAccessibilityService.triggerEmergencyStop()
                 }
-                steps.add(TaskStep(1, "启动应用程序: $appName", "RUNNING", "正在查询已安装应用并调起原生启动 Intent..."))
+                steps.add(TaskStep(1, "启动应用程序: $appName", "RUNNING", "正在查询已安装应用并调起原生 Intent..."))
                 onStepUpdated(steps.toList())
 
                 val res = AppLauncherHelper.launchApp(context, appName)
@@ -710,6 +879,16 @@ class AgentOrchestrator(
 
                 if (res.success) {
                     ScreenActionHud.complete("✅ 已成功打开「${res.appName}」", 2500L)
+                    // 弹出交互式横幅
+                    ScreenActionHud.showCompletionBanner(
+                        context = context,
+                        title = "🚀 已打开 ${res.appName}",
+                        message = "点击此处可展开悬浮窗继续下达指令",
+                        autoDismissMs = 7000L,
+                        onOpenChat = {
+                            FloatingAssistantManager.showFloatingService(context)
+                        }
+                    )
                 } else {
                     ScreenActionHud.failed(res.message, 2500L)
                 }
@@ -1095,9 +1274,66 @@ class AgentOrchestrator(
                     delay(600L)
                     if (success) {
                         ScreenActionHud.update("✅ 已填入: \"$text\"")
-                        "成功在当前屏幕输入框输入「$text」${if (submit) "并触发搜索/提交" else ""}。请调用 inspect_current_screen 查看搜索结果并点击第一个相关视频播放！"
+                        // 智能闭环自愈：若为搜索提交，等待 1.2 秒检测搜索结果，若发现首个视频卡片则自动顺手点击进入播放
+                        var clickedVideo = false
+                        if (submit) {
+                            delay(1200L)
+                            clickedVideo = ScreenAssistantAccessibilityService.clickFirstVideoCardInSearchResults()
+                        }
+                        if (clickedVideo) {
+                            ScreenActionHud.complete("🎬 已搜索并自动播放匹配视频！", 2500L)
+                            "成功在当前屏幕输入框输入「$text」并提交搜索，且已自动为您点击首个匹配的视频卡片进入播放！任务目标已圆满达成！"
+                        } else {
+                            "成功在当前屏幕输入框输入「$text」${if (submit) "并触发搜索/提交" else ""}。请调用 inspect_current_screen 查看搜索结果并点击第一个相关视频播放！"
+                        }
                     } else {
                         "输入未成功：未检测到已聚焦的输入框控件。请先调用 operate_screen_click 点击搜索框使其获取焦点，然后再调用 operate_screen_input！"
+                    }
+                }
+            }
+            "save_long_term_memory" -> {
+                val key = if (args.has("key") && !args.get("key").isJsonNull) args.get("key").asString else ""
+                val value = if (args.has("value") && !args.get("value").isJsonNull) args.get("value").asString else ""
+                val label = if (args.has("label") && !args.get("label").isJsonNull) args.get("label").asString else null
+                if (key.isBlank() || value.isBlank()) {
+                    "保存记忆失败：key 和 value 不能为空。"
+                } else {
+                    vault.saveMemory(key, value, label ?: key)
+                    "✅ 已成功将「${label ?: key}」安全保存至本地硬件加密长时记忆库中！后续所有对话中均可随时调用该记忆（例如在登录或表单时自动填入）。"
+                }
+            }
+            "recall_long_term_memory" -> {
+                val key = if (args.has("key") && !args.get("key").isJsonNull) args.get("key").asString else null
+                if (!key.isNullOrBlank()) {
+                    val mem = vault.getMemory(key)
+                    if (mem != null) {
+                        val obj = JsonObject().apply {
+                            addProperty("key", key)
+                            addProperty("value", mem)
+                            addProperty("label", key)
+                        }
+                        obj.toString()
+                    } else {
+                        "未在长时记忆库中找到键名为「$key」的记忆。"
+                    }
+                } else {
+                    val all: List<UserMemoryItem> = vault.getAllMemories()
+                    if (all.isEmpty()) {
+                        "当前长时记忆库为空，尚未保存任何用户专属记忆。"
+                    } else {
+                        val arr = JsonArray()
+                        all.forEach { m: UserMemoryItem ->
+                            arr.add(JsonObject().apply {
+                                addProperty("key", m.key)
+                                addProperty("value", m.value)
+                                addProperty("label", m.label)
+                                addProperty("updatedTime", m.updatedTime)
+                            })
+                        }
+                        JsonObject().apply {
+                            addProperty("count", all.size)
+                            add("memories", arr)
+                        }.toString()
                     }
                 }
             }

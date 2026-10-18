@@ -142,4 +142,89 @@ class KeyStoreVault(private val context: Context) {
     fun setOfflinePreferred(preferred: Boolean) {
         prefs.edit().putBoolean(KEY_OFFLINE_PREFERRED, preferred).apply()
     }
+
+    // ==========================================
+    // 永久长时记忆模块 (AES-256-GCM 硬件加密存储)
+    // ==========================================
+
+    private val memoryKeysPref = "user_memory_all_keys"
+
+    /**
+     * 保存一条长时记忆（硬件级加密，跨会话/开新对话永久保留）
+     */
+    fun saveMemory(key: String, value: String, label: String = "") {
+        val cleanKey = key.trim().lowercase()
+        val encValue = encrypt(value.trim())
+        val displayLabel = label.ifBlank { key }
+        val now = System.currentTimeMillis()
+
+        val allKeys = getMemoryKeys().toMutableSet()
+        allKeys.add(cleanKey)
+
+        prefs.edit()
+            .putStringSet(memoryKeysPref, allKeys)
+            .putString("mem_val_$cleanKey", encValue)
+            .putString("mem_lbl_$cleanKey", displayLabel)
+            .putLong("mem_time_$cleanKey", now)
+            .apply()
+    }
+
+    /**
+     * 根据键名获取解密后的长时记忆内容
+     */
+    fun getMemory(key: String): String? {
+        val cleanKey = key.trim().lowercase()
+        val enc = prefs.getString("mem_val_$cleanKey", null) ?: return null
+        val decrypted = decrypt(enc)
+        return decrypted.ifEmpty { null }
+    }
+
+    /**
+     * 获取所有永久长时记忆列表（已解密）
+     */
+    fun getAllMemories(): List<com.aiagent.android.model.UserMemoryItem> {
+        val keys = getMemoryKeys()
+        val list = mutableListOf<com.aiagent.android.model.UserMemoryItem>()
+        for (k in keys) {
+            val enc = prefs.getString("mem_val_$k", null) ?: continue
+            val value = decrypt(enc)
+            val label = prefs.getString("mem_lbl_$k", k) ?: k
+            val time = prefs.getLong("mem_time_$k", 0L)
+            list.add(com.aiagent.android.model.UserMemoryItem(key = k, value = value, label = label, updatedTime = time))
+        }
+        return list.sortedByDescending { it.updatedTime }
+    }
+
+    /**
+     * 删除指定长时记忆
+     */
+    fun deleteMemory(key: String) {
+        val cleanKey = key.trim().lowercase()
+        val allKeys = getMemoryKeys().toMutableSet()
+        allKeys.remove(cleanKey)
+        prefs.edit()
+            .putStringSet(memoryKeysPref, allKeys)
+            .remove("mem_val_$cleanKey")
+            .remove("mem_lbl_$cleanKey")
+            .remove("mem_time_$cleanKey")
+            .apply()
+    }
+
+    /**
+     * 清空所有长时记忆
+     */
+    fun clearAllMemories() {
+        val keys = getMemoryKeys()
+        val editor = prefs.edit()
+        for (k in keys) {
+            editor.remove("mem_val_$k")
+            editor.remove("mem_lbl_$k")
+            editor.remove("mem_time_$k")
+        }
+        editor.remove(memoryKeysPref).apply()
+    }
+
+    private fun getMemoryKeys(): Set<String> {
+        return prefs.getStringSet(memoryKeysPref, emptySet()) ?: emptySet()
+    }
 }

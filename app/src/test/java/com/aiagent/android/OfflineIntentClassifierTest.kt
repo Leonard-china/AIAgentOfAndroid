@@ -3,6 +3,7 @@ package com.aiagent.android
 import com.aiagent.android.ai.OfflineIntent
 import com.aiagent.android.ai.OfflineIntentClassifier
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class OfflineIntentClassifierTest {
@@ -72,6 +73,33 @@ class OfflineIntentClassifierTest {
         assertEquals("哔哩哔哩", OfflineIntentClassifier.extractAppName("帮我打开哔哩哔哩应用"))
         assertEquals("微信", OfflineIntentClassifier.extractAppName("请启动微信客户端"))
         assertEquals("抖音", OfflineIntentClassifier.extractAppName("立即打开抖音"))
+    }
+
+    @Test
+    fun testLongTermMemoryIntents() {
+        assertEquals(OfflineIntent.SAVE_MEMORY, OfflineIntentClassifier.classify("记住我的手机号是13812345678"))
+        assertEquals(OfflineIntent.SAVE_MEMORY, OfflineIntentClassifier.classify("记住我的密码是Secret123"))
+        assertEquals(OfflineIntent.SAVE_MEMORY, OfflineIntentClassifier.classify("记住我叫小明"))
+        assertEquals(OfflineIntent.RECALL_MEMORY, OfflineIntentClassifier.classify("我的手机号是多少"))
+        assertEquals(OfflineIntent.RECALL_MEMORY, OfflineIntentClassifier.classify("查看记忆"))
+        assertEquals(OfflineIntent.RECALL_MEMORY, OfflineIntentClassifier.classify("你记住了什么"))
+
+        val phoneKv = OfflineIntentClassifier.extractMemoryKeyValue("记住我的手机号是13812345678")
+        assertNotNull(phoneKv)
+        assertEquals("phone", phoneKv!!.first)
+        assertEquals("13812345678", phoneKv.second)
+
+        val pwdKv = OfflineIntentClassifier.extractMemoryKeyValue("记住我的密码是P@ssw0rd")
+        assertNotNull(pwdKv)
+        assertEquals("password", pwdKv!!.first)
+        assertEquals("P@ssw0rd", pwdKv.second)
+    }
+
+    @Test
+    fun testExtractVideoSearchKeyword() {
+        assertEquals("3blue1brown", OfflineIntentClassifier.extractVideoSearchKeyword("打开B站并为我推荐一个3blue1brown的科普视频"))
+        assertEquals("3blue1brown", OfflineIntentClassifier.extractVideoSearchKeyword("在B站搜3blue1brown看"))
+        assertEquals(null, OfflineIntentClassifier.extractVideoSearchKeyword("给我推个B站视频看"))
     }
 
     @Test

@@ -536,6 +536,61 @@
 - **Git 提交标识**：`e6bd428`
 ---
 
+## [2026-10-18 10:52:00] - 落地硬件加密长时记忆、端到端搜索播放闭环与就地交互通知横幅
+
+- **变更摘要**：
+  - **基于 Android KeyStore 硬件级 AES-256-GCM 保护的永久长时记忆系统**：
+    - 在 `model/Models.kt` 建立 `UserMemoryItem` 领域数据模型（key, value, label, updatedTime）；
+    - 在 `security/KeyStoreVault.kt` 实现 `saveMemory`、`getMemory`、`getAllMemories`、`deleteMemory`、`clearAllMemories`，全部基于设备独立安全芯片硬件模块加密；
+    - 在 `ToolRegistry.kt` 注册核心工具：
+      1. `save_long_term_memory`（工具 18）：支持大模型或本地提取敏感信息（手机号、密码、称呼、偏好）持久保存；
+      2. `recall_long_term_memory`（工具 19）：支持大模型在登录或表单场景下随时召回；
+    - 在 `AgentOrchestrator.kt` 的 System Prompt 注入长时记忆库及自动填表铁律；并在离线与在线分支中全面打通记忆存取；
+    - 在 `ui/SettingsScreen.kt` 落地【专属长时记忆】管理卡片与弹窗，支持分类打码脱敏（手机号中间4位掩码、密码星号掩码），支持小眼睛查看明文、手动增删及一键清空。
+  - **视频搜索与播放端到端闭环自愈**：
+    - 针对用户实测反馈“打完字后还没有播放视频就草率结束”的问题：
+    - 在 `ScreenAssistantAccessibilityService.kt` 实现 `submitSearch(keyword)`：具备 ACTION_IME_ENTER、顶栏搜索按钮定向定位、联想词首项点击与回车手势四重回退保底；
+    - 实现 `clickFirstVideoCardInSearchResults()`：精准过滤输入法联想词，自动提取并点击首个真实搜索结果视频卡片进入播放；
+    - 在 `operate_screen_input` 工具中引入智能闭环自愈：若 submit=true，在本地毫秒级检测并自动帮用户点击首个搜索出的视频卡片直接进入播放详情；
+    - 在离线规则 `RECOMMEND_VIDEO` 中支持视频搜索词提取（如“3blue1brown”、“科普视频”），完成“启动 -> 跳广告 -> 搜索 -> 点首卡播放”全流程自动闭环。
+  - **交互式完成通知横幅 (Interactive Completion Banner)**：
+    - 针对用户提出“任务完成后如果有什么要说明的，希望能出一个像信息一样的弹窗，点击后能在当前页面（如B站）直接继续交流”的需求；
+    - 在 `ScreenActionHud.kt` 中实现 `showCompletionBanner`：采用 `TYPE_ACCESSIBILITY_OVERLAY` 高质感毛玻璃通知弹窗样式，集成“🤖 AI 智能管家”、“说明内容”及“💬 继续交流”胶囊按键；
+    - 用户点击横幅或胶囊按键，立即就地调用 `FloatingAssistantManager.showFloatingService(context)` 唤出桌面悬浮窗，直接在第三方应用（如 B 站）上层继续下达指令，完全无需切换回主 App；8.5 秒无操作自动淡出。
+- **修改原因**：
+  - 响应用户最新提出的三项核心痛点：
+    1. 视频搜索打字后停滞，未能进入播放；
+    2. 需要跨对话长时记忆，自动输入手机号或密码；
+    3. 任务结束后无需回主 App，能在当前第三方界面通过消息通知横幅就地展开悬浮窗继续对话。
+- **涉及文件或模块**：
+  - `app/src/main/java/com/aiagent/android/model/Models.kt`
+  - `app/src/main/java/com/aiagent/android/security/KeyStoreVault.kt`
+  - `app/src/main/java/com/aiagent/android/ai/ToolRegistry.kt`
+  - `app/src/main/java/com/aiagent/android/ai/OfflineIntentClassifier.kt`
+  - `app/src/main/java/com/aiagent/android/ai/AgentOrchestrator.kt`
+  - `app/src/main/java/com/aiagent/android/screen/ScreenAssistantAccessibilityService.kt`
+  - `app/src/main/java/com/aiagent/android/screen/ScreenActionHud.kt`
+  - `app/src/main/java/com/aiagent/android/ui/SettingsScreen.kt`
+  - `app/src/test/java/com/aiagent/android/OfflineIntentClassifierTest.kt`
+  - `app/src/test/java/com/aiagent/android/ToolRegistryTest.kt`
+  - `docs/CHANGELOG.md`
+  - `docs/HANDOFF.md`
+- **验证方法与真实结果**：
+  - 验证方法：
+    1. 单元测试：`.\gradlew.bat testDebugUnitTest`；
+    2. Release APK 构建：`.\gradlew.bat assembleRelease`；
+    3. 真机静默安装：`adb push` + `pm install -r -t -g` 至荣耀 VKJ-AN00 (Android 16, serial: `AXRBUT6520002413`)；
+    4. 无障碍与悬浮窗状态检查：`settings get secure enabled_accessibility_services`。
+  - 真实结果：
+    1. 单元测试全量通过：6 个测试类、21 个用例全部通过（0 失败）；
+    2. Release APK 构建成功（耗时 32s，大小 45.9 MB）；
+    3. 真机静默覆盖安装成功（`Success`），无障碍辅助服务持续保持激活状态（`ScreenAssistantAccessibilityService`）。
+- **已知问题与后续事项**：
+  - 已知问题：无。
+  - 后续事项：向用户汇报新功能与真机测试结果，指导用户在手机上体验跨对话长时记忆、B站搜索播放闭环与完成时的消息通知弹窗。
+- **Git 提交标识**：待提交（本轮变更后提交）
+---
+
 
 
 

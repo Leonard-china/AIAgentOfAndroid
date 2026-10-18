@@ -11,6 +11,8 @@ package com.aiagent.android.ai
  */
 enum class OfflineIntent {
     NEW_CHAT,
+    SAVE_MEMORY,
+    RECALL_MEMORY,
     FLOATING_WINDOW,
     OPEN_ACCESSIBILITY_SETTINGS,
     INSPECT_SCREEN,
@@ -37,6 +39,13 @@ object OfflineIntentClassifier {
         fun hasAny(vararg keywords: String): Boolean = keywords.any { lower.contains(it) }
 
         return when {
+            // 0. 长时记忆保存与召回（跨会话永久生效）
+            hasAny("记住我的", "记住我", "记住密码", "记住手机号", "保存记忆", "记下我的", "记一下我的") ->
+                OfflineIntent.SAVE_MEMORY
+
+            hasAny("我的手机号是多少", "我的密码是多少", "我叫什么", "你记住了什么", "查看记忆", "长时记忆", "我的记忆") ->
+                OfflineIntent.RECALL_MEMORY
+
             // 1. 会话重置：最高优先级，且必须精确短语，避免误伤普通对话
             hasAny("开新对话", "新建对话", "清空对话", "重新开始") -> OfflineIntent.NEW_CHAT
 
@@ -57,10 +66,11 @@ object OfflineIntentClassifier {
             hasAny("滑动", "下滑", "上滑", "翻页") -> OfflineIntent.SCREEN_SWIPE
             hasAny("返回", "回桌面", "回到桌面", "桌面") -> OfflineIntent.SCREEN_GLOBAL
 
-            // 7. 跨应用复合操作：看视频/推视频任务（先于本地大视频检索与单纯打开应用）
-            hasAny("推个视频", "推荐视频", "看视频", "推视频", "看b站", "刷视频", "看个视频", "播放视频", "推个b站视频", "推视频看") ||
+            // 7. 跨应用复合操作：看视频/推视频/搜视频任务（先于本地大视频检索与单纯打开应用）
+            hasAny("推个视频", "推荐视频", "看视频", "推视频", "看b站", "刷视频", "看个视频", "播放视频", "推个b站视频", "推视频看", "搜视频", "找视频") ||
                     (lower.contains("推") && lower.contains("视频")) ||
-                    (lower.contains("b站") && lower.contains("视频")) -> OfflineIntent.RECOMMEND_VIDEO
+                    (lower.contains("b站") && (lower.contains("视频") || lower.contains("搜") || lower.contains("找") || lower.contains("看") || lower.contains("播"))) ||
+                    lower.contains("3blue1brown") -> OfflineIntent.RECOMMEND_VIDEO
 
             // 8. 相册/文件分析类
             hasAny("截图", "截屏") -> OfflineIntent.SCREENSHOTS
@@ -105,5 +115,70 @@ object OfflineIntentClassifier {
             }
         }
         return clean.ifBlank { prompt.trim() }
+    }
+
+    /**
+     * 从用户的视频搜索/推荐指令中提取搜索关键词
+     * 例如："打开B站并为我推荐一个3blue1brown的科普视频" -> "3blue1brown"
+     * "在B站搜3blue1brown看" -> "3blue1brown"
+     */
+    fun extractVideoSearchKeyword(prompt: String): String? {
+        val lower = prompt.lowercase()
+        if (lower.contains("3blue1brown")) {
+            return "3blue1brown"
+        }
+        val patterns = listOf(
+            Regex("""(?:搜|找)(.+?)(?:的?(?:科普)?视频|视频|看|播放|$)"""),
+            Regex("""(?:推荐|推)(?:一个|部|点)?(.+?)(?:的?(?:科普)?视频|视频)""")
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(prompt)
+            if (match != null && match.groupValues.size > 1) {
+                var candidate = match.groupValues[1].trim()
+                val stopWords = listOf("在b站", "打开b站", "哔哩哔哩", "b站", "并为我", "给我", "一个", "个", "部", "点", "看", "相关")
+                for (sw in stopWords) {
+                    candidate = candidate.replace(sw, "", ignoreCase = true).trim()
+                }
+                if (candidate.isNotEmpty() && candidate.length <= 30 && candidate !in listOf("好看", "有趣", "精彩", "热门", "推荐", "短", "搞笑", "最新")) {
+                    return candidate
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 从记忆指令中提取键值与备注
+     * 例如："记住我的手机号是13812345678" -> key="phone", value="13812345678", label="手机号"
+     */
+    fun extractMemoryKeyValue(prompt: String): Triple<String, String, String>? {
+        val lower = prompt.lowercase()
+        // 手机号检测
+        val phoneRegex = Regex("""(?:手机号|电话|手机号码|号码)(?:是|为|:|：|\s+)?(\d{11})""")
+        val phoneMatch = phoneRegex.find(prompt)
+        if (phoneMatch != null) {
+            val phone = phoneMatch.groupValues[1]
+            return Triple("phone", phone, "手机号")
+        }
+
+        // 密码检测
+        val pwdRegex = Regex("""(?:密码)(?:是|为|:|：|\s+)?([A-Za-z0-9@#\$%^&*_\-\.]{4,32})""")
+        val pwdMatch = pwdRegex.find(prompt)
+        if (pwdMatch != null) {
+            val pwd = pwdMatch.groupValues[1]
+            return Triple("password", pwd, "登录密码")
+        }
+
+        // 称呼检测
+        val nameRegex = Regex("""(?:叫我|我叫|称呼我为|我的名字是)(.+?)$""")
+        val nameMatch = nameRegex.find(prompt)
+        if (nameMatch != null) {
+            val name = nameMatch.groupValues[1].trim()
+            if (name.isNotEmpty()) {
+                return Triple("user_name", name, "用户称呼")
+            }
+        }
+
+        return null
     }
 }

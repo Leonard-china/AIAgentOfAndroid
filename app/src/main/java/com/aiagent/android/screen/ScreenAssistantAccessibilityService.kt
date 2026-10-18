@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -244,17 +245,126 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
                 if (setSuccess) {
                     if (submit) {
                         try {
-                            Thread.sleep(400L)
+                            Thread.sleep(500L)
                         } catch (_: InterruptedException) {}
-                        // 尝试点击搜索/确定按钮
-                        val searchClicked = findAndClick("搜索") || findAndClick("确定") || findAndClick("前往")
-                        Log.i(TAG, "Search/Confirm button click result: $searchClicked")
+                        val searchClicked = submitSearch(text)
+                        Log.i(TAG, "submitSearch result: $searchClicked")
                     }
                     return true
                 }
             }
             Log.w(TAG, "No editable node found to input text: \"$text\"")
             return false
+        }
+
+        /**
+         * 强化版搜索提交：综合考虑顶栏搜索按钮、搜索候选联想词项、软键盘回车键
+         */
+        fun submitSearch(keyword: String = ""): Boolean {
+            val svc = instance ?: return false
+            val root = svc.rootInActiveWindow ?: return false
+            val dm = svc.resources.displayMetrics
+            val width = dm.widthPixels.toFloat()
+            val height = dm.heightPixels.toFloat()
+
+            // 1. 尝试对当前焦点输入框执行 ACTION_IME_ENTER (API 30+)
+            val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focused != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (focused.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+                    Log.i(TAG, "submitSearch via ACTION_IME_ENTER succeeded")
+                    return true
+                }
+            }
+
+            // 2. 查找屏幕顶部的“搜索”按钮（Y < 16% 高度，X > 65% 屏幕宽度）
+            val bounds = Rect()
+            val searchNodes = root.findAccessibilityNodeInfosByText("搜索")
+            for (node in searchNodes) {
+                node.getBoundsInScreen(bounds)
+                if (bounds.top < height * 0.16f && bounds.right > width * 0.65f) {
+                    if (svc.clickNodeOrParent(node) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())) {
+                        Log.i(TAG, "submitSearch via top-right search button succeeded @(${bounds.centerX()}, ${bounds.centerY()})")
+                        return true
+                    }
+                }
+            }
+
+            // 3. 点击联想词列表中的首个候选词（如 "3Blue1Brown" 或包含关键词的项）
+            if (keyword.isNotEmpty()) {
+                val suggestionNodes = root.findAccessibilityNodeInfosByText(keyword)
+                for (node in suggestionNodes) {
+                    node.getBoundsInScreen(bounds)
+                    if (bounds.top in (height * 0.08f).toInt()..(height * 0.45f).toInt()) {
+                        if (svc.clickNodeOrParent(node) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())) {
+                            Log.i(TAG, "submitSearch via suggestion item succeeded: ${node.text} @(${bounds.centerX()}, ${bounds.centerY()})")
+                            return true
+                        }
+                    }
+                }
+            }
+
+            // 4. 坐标回退保底：
+            // 4a. 顶栏右侧“搜索”固定位置点击
+            val topSearchOk = clickAt(width * 0.92f, height * 0.055f)
+            if (topSearchOk) {
+                Log.i(TAG, "submitSearch fallback tap on top-right search coord succeeded")
+                return true
+            }
+
+            // 4b. 软键盘右下角“搜索”按键位置点击
+            val imeSearchOk = clickAt(width * 0.90f, height * 0.94f)
+            Log.i(TAG, "submitSearch fallback tap on keyboard search key -> $imeSearchOk")
+            return imeSearchOk
+        }
+
+        /**
+         * 在搜索结果页自动寻找并点击首个视频卡片进入播放
+         */
+        fun clickFirstVideoCardInSearchResults(): Boolean {
+            val svc = instance ?: return false
+            val root = svc.rootInActiveWindow ?: return false
+            val dm = svc.resources.displayMetrics
+            val width = dm.widthPixels.toFloat()
+            val height = dm.heightPixels.toFloat()
+            val bounds = Rect()
+
+            // 1. 寻找搜索结果列表中的视频卡片节点
+            fun findVideoNode(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+                if (node == null || depth > 16) return null
+                val text = node.text?.toString() ?: node.contentDescription?.toString()
+                if (text != null && text.length in 5..80 &&
+                    !text.contains("综合") && !text.contains("番剧") && !text.contains("筛选") &&
+                    !text.contains("关注") && !text.contains("动态") && !text.contains("会员购")
+                ) {
+                    node.getBoundsInScreen(bounds)
+                    if (bounds.width() > width * 0.35f && bounds.top in (height * 0.10f).toInt()..(height * 0.60f).toInt()) {
+                        return node
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = node.getChild(i)
+                    val found = findVideoNode(child, depth + 1)
+                    if (found != null) return found
+                }
+                return null
+            }
+
+            val videoNode = findVideoNode(root, 0)
+            if (videoNode != null) {
+                videoNode.getBoundsInScreen(bounds)
+                val clicked = svc.clickNodeOrParent(videoNode) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                if (clicked) {
+                    Log.i(TAG, "clickFirstVideoCardInSearchResults found and clicked: ${videoNode.text ?: videoNode.contentDescription}")
+                    return true
+                }
+            }
+
+            // 2. 坐标保底：首个搜索结果视频卡片物理中心 (width * 0.5f, height * 0.28f)
+            val fallbackX = width * 0.5f
+            val fallbackY = height * 0.28f
+            val coordOk = clickAt(fallbackX, fallbackY)
+            Log.i(TAG, "clickFirstVideoCardInSearchResults coordinate tap fallback -> $coordOk")
+            return coordOk
         }
 
         private fun findFirstEditableNode(node: AccessibilityNodeInfo, depth: Int = 0): AccessibilityNodeInfo? {
