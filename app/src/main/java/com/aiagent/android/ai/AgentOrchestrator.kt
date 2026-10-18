@@ -178,24 +178,41 @@ class AgentOrchestrator(
                     val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying()
 
                     if (isVideoTask && !isPlaying && currentTurn < maxTurns) {
-                        // 本地尝试自愈：检测并点击首个搜索卡片
+                        // 1. 若当前已经停留在 UP主个人空间（如 3Blue1Brown 主页），立即自愈触发播放全部或投稿视频
+                        if (ScreenAssistantAccessibilityService.isBilibiliOnUpSpace()) {
+                            ScreenActionHud.update("🎬 检测到处于 UP 主空间，正在自动点击播放视频...")
+                            val spacePlayed = ScreenAssistantAccessibilityService.playVideoFromUpSpace()
+                            delay(1200L)
+                            if (spacePlayed || ScreenAssistantAccessibilityService.isVideoPlaying()) {
+                                finalReplyContent = "🎬 已为您在 UP 主空间自动点击播放精选视频！祝您观影愉快！😊"
+                                break
+                            }
+                        }
+
+                        // 2. 本地尝试自愈：检测并点击首个搜索卡片
                         val cardClicked = ScreenAssistantAccessibilityService.clickFirstVideoCardInSearchResults()
                         if (cardClicked) {
                             delay(1200L)
-                            if (ScreenAssistantAccessibilityService.isVideoPlaying()) {
-                                finalReplyContent = "🎬 已为您在哔哩哔哩搜索并自动点击进入首个视频播放详情页！祝您观影愉快！😊"
+                            if (ScreenAssistantAccessibilityService.isVideoPlaying() || ScreenAssistantAccessibilityService.isBilibiliOnUpSpace()) {
+                                finalReplyContent = "🎬 已为您在哔哩哔哩搜索并自动点击进入视频播放！祝您观影愉快！😊"
                                 break
                             }
                         }
 
                         // 强指令注入督促大模型继续推进，严禁草率结束
                         response.rawMessage?.let { messages.add(it) }
+                        val searchKw = OfflineIntentClassifier.extractVideoSearchKeyword(userPrompt)
+                        val superviseContent = if (!searchKw.isNullOrBlank()) {
+                            "【目标未达成警告】：当前视频尚未开始播放！用户的明确意图是观看「$searchKw」的相关视频。请先调用 operate_screen_click 点击顶部搜索入口，然后调用 operate_screen_input(text='$searchKw', submit=true) 搜索并点击首个视频卡片进入播放！严禁提前结束！"
+                        } else {
+                            "【目标未达成警告】：当前视频尚未开始播放！严禁停留在文字输入或候选页面！用户的明确意图是观看视频。请调用 operate_screen_click 点击首个相关视频卡片进入播放！"
+                        }
                         val superviseMsg = JsonObject().apply {
                             addProperty("role", "user")
-                            addProperty("content", "【目标未达成警告】：当前视频尚未开始播放！严禁停留在文字输入或候选页面！用户的明确意图是观看视频。请立即调用 operate_screen_click 点击首个相关视频卡片进入播放！")
+                            addProperty("content", superviseContent)
                         }
                         messages.add(superviseMsg)
-                        ScreenActionHud.update("🎬 正在督促 AI 点击首个视频卡片播放...")
+                        ScreenActionHud.update("🎬 正在督促 AI 寻找并播放视频...")
                         continue
                     }
 
@@ -235,34 +252,48 @@ class AgentOrchestrator(
                 }
             }
 
-            if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
-                ScreenActionHud.failed("自动化操作已中止", 2000L)
-            } else {
-                ScreenActionHud.complete("✅ 任务已完成", 1500L)
-            }
-
             val reply = if (!finalReplyContent.isNullOrBlank()) {
                 finalReplyContent
             } else if (finalPlan != null) {
                 "已为您制定操作计划并生成确认卡片，请在下方卡片中核对目标文件并确认是否移入回收站。"
             } else if (ScreenAssistantAccessibilityService.isVideoPlaying()) {
                 "🎬 已成功为您在应用中定位并播放相关视频！祝您观看愉快！"
+            } else if (ScreenAssistantAccessibilityService.isBilibiliOnUpSpace()) {
+                "📺 已为您进入 UP 主个人空间并开始播放精选视频！祝您观影愉快！"
             } else if (ScreenAssistantAccessibilityService.isBilibiliOnMyPage()) {
                 "📱 已为您启动哔哩哔哩，但此前停留在个人中心界面。已为您尝试切换回首页推荐流，您可以挑选喜爱的视频播放。"
             } else {
                 "📱 已为您执行相关屏幕操作并进入目标界面。"
             }
 
-            // 像信息一样的交互横幅，用户点击后在当前应用（如B站）就地弹出悬浮窗继续交流
-            ScreenActionHud.showCompletionBanner(
-                context = context,
-                title = if (ScreenAssistantAccessibilityService.isVideoPlaying()) "🎬 视频已开始播放" else "🤖 AI 智能管家",
-                message = reply.lines().firstOrNull { it.isNotBlank() } ?: "点击此处可就地展开悬浮对话窗继续交流",
-                autoDismissMs = 8500L,
-                onOpenChat = {
-                    FloatingAssistantManager.showFloatingService(context)
+            if (ScreenAssistantAccessibilityService.isEmergencyStopped()) {
+                ScreenActionHud.failed("自动化操作已中止", 2000L)
+            } else {
+                val bannerTitle = when {
+                    ScreenAssistantAccessibilityService.isVideoPlaying() -> "🎬 视频已开始播放"
+                    ScreenAssistantAccessibilityService.isBilibiliOnUpSpace() -> "📺 已进入 UP 主空间播放"
+                    userPrompt.contains("长时记忆") || userPrompt.contains("密码") -> "🔒 长时记忆已保存"
+                    else -> "✅ 任务已圆满完成"
                 }
-            )
+                val bannerMsg = reply.lines().firstOrNull { it.isNotBlank() } ?: "点击此处可就地展开悬浮对话窗继续交流"
+
+                ScreenActionHud.showCompletion(
+                    context = context,
+                    title = bannerTitle,
+                    message = bannerMsg,
+                    autoDismissMs = 8500L,
+                    onOpenChat = {
+                        if (FloatingAssistantManager.hasOverlayPermission(context)) {
+                            FloatingAssistantManager.showFloatingService(context)
+                        } else {
+                            ScreenAssistantAccessibilityService.showQuickChatOverlay(
+                                context = context,
+                                summary = bannerMsg
+                            )
+                        }
+                    }
+                )
+            }
 
             AiMessage(
                 sender = "ASSISTANT",
@@ -321,12 +352,21 @@ class AgentOrchestrator(
                             "• 内容：`$masked`（Android KeyStore 硬件级 AES-256-GCM 保护）\n" +
                             "• 作用：跨会话永久生效，即使开启新对话也不会遗忘；在后续遇到填表、登录或输入时，我将自动为您填入。"
 
-                    ScreenActionHud.showCompletionBanner(
+                    ScreenActionHud.showCompletion(
                         context = context,
                         title = "🔒 长时记忆已保存",
-                        message = "已安全加密保存 $label，开新对话也不忘",
-                        autoDismissMs = 6000L,
-                        onOpenChat = { FloatingAssistantManager.showFloatingService(context) }
+                        message = "已安全加密保存 $label，开新对话也不会遗忘",
+                        autoDismissMs = 7000L,
+                        onOpenChat = {
+                            if (FloatingAssistantManager.hasOverlayPermission(context)) {
+                                FloatingAssistantManager.showFloatingService(context)
+                            } else {
+                                ScreenAssistantAccessibilityService.showQuickChatOverlay(
+                                    context = context,
+                                    summary = "长时记忆已保存，随时可下达新指令"
+                                )
+                            }
+                        }
                     )
 
                     AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
@@ -372,12 +412,21 @@ class AgentOrchestrator(
                         appendLine("\n🔐 *所有数据均由本设备独立芯片安全模块 (TEE/StrongBox) 硬件级加密，绝不会上传云端。*")
                     }
 
-                    ScreenActionHud.showCompletionBanner(
+                    ScreenActionHud.showCompletion(
                         context = context,
                         title = "🧠 专属长时记忆库",
                         message = "已加载 ${all.size} 条专属记忆，随时可在当前界面继续对话",
-                        autoDismissMs = 6000L,
-                        onOpenChat = { FloatingAssistantManager.showFloatingService(context) }
+                        autoDismissMs = 7000L,
+                        onOpenChat = {
+                            if (FloatingAssistantManager.hasOverlayPermission(context)) {
+                                FloatingAssistantManager.showFloatingService(context)
+                            } else {
+                                ScreenAssistantAccessibilityService.showQuickChatOverlay(
+                                    context = context,
+                                    summary = "已加载长时记忆，随时可吩咐新任务"
+                                )
+                            }
+                        }
                     )
 
                     AiMessage(sender = "ASSISTANT", content = reply, taskSteps = steps)
@@ -845,8 +894,6 @@ class AgentOrchestrator(
                     steps[3].detail = if (isPlaying) "已进入视频播放详情页" else "已点击匹配视频卡片"
                     onStepUpdated(steps.toList())
 
-                    ScreenActionHud.complete("🎬 已为您播放「$searchKeyword」相关视频！", 3000L)
-
                     "🎬 **已为您在哔哩哔哩搜索并播放「$searchKeyword」相关视频！**\n\n" +
                             "• 广告处理：本地毫秒级自动跳过开屏广告\n" +
                             "• 搜索定位：已成功搜索「$searchKeyword」并自动点击首个视频卡片\n" +
@@ -869,22 +916,27 @@ class AgentOrchestrator(
                     steps[2].detail = if (isPlaying) "成功进入视频播放详情页" else "已点击推荐位视频卡片"
                     onStepUpdated(steps.toList())
 
-                    ScreenActionHud.complete("✅ 已为您打开并播放推荐视频！", 3000L)
-
                     "🎬 **已为您在哔哩哔哩打开并点击播放推荐视频！**\n\n" +
                             "• 广告处理：已在本地毫秒级自动跳过开屏广告\n" +
                             "• 目标达成：已在推荐流为您挑选并进入视频播放\n" +
                             "祝您观影愉快！😊"
                 }
 
-                // 交互式完成横幅：用户点击后在当前应用（如B站）就地弹出悬浮窗继续交流
-                ScreenActionHud.showCompletionBanner(
+                // 交互式完成横幅：展示视频播放状态，点击可就地展开交流或随手关闭
+                ScreenActionHud.showCompletion(
                     context = context,
                     title = "🎬 视频已开始播放",
-                    message = "点击此处可就地展开悬浮对话窗继续交流",
+                    message = "已为您在哔哩哔哩进入视频播放。点击此处可就地继续交流。",
                     autoDismissMs = 8500L,
                     onOpenChat = {
-                        FloatingAssistantManager.showFloatingService(context)
+                        if (FloatingAssistantManager.hasOverlayPermission(context)) {
+                            FloatingAssistantManager.showFloatingService(context)
+                        } else {
+                            ScreenAssistantAccessibilityService.showQuickChatOverlay(
+                                context = context,
+                                summary = "🎬 视频已开始播放，随时吩咐新任务"
+                            )
+                        }
                     }
                 )
 
@@ -905,15 +957,20 @@ class AgentOrchestrator(
                 onStepUpdated(steps.toList())
 
                 if (res.success) {
-                    ScreenActionHud.complete("✅ 已成功打开「${res.appName}」", 2500L)
-                    // 弹出交互式横幅
-                    ScreenActionHud.showCompletionBanner(
+                    ScreenActionHud.showCompletion(
                         context = context,
                         title = "🚀 已打开 ${res.appName}",
-                        message = "点击此处可展开悬浮窗继续下达指令",
-                        autoDismissMs = 7000L,
+                        message = "应用已切至前台，点击此处可继续下达指令",
+                        autoDismissMs = 7500L,
                         onOpenChat = {
-                            FloatingAssistantManager.showFloatingService(context)
+                            if (FloatingAssistantManager.hasOverlayPermission(context)) {
+                                FloatingAssistantManager.showFloatingService(context)
+                            } else {
+                                ScreenAssistantAccessibilityService.showQuickChatOverlay(
+                                    context = context,
+                                    summary = "已打开 ${res.appName}，随时可吩咐新指令"
+                                )
+                            }
                         }
                     )
                 } else {
@@ -1307,11 +1364,12 @@ class AgentOrchestrator(
                             delay(1200L)
                             clickedVideo = ScreenAssistantAccessibilityService.clickFirstVideoCardInSearchResults()
                         }
-                        if (clickedVideo) {
-                            ScreenActionHud.complete("🎬 已搜索并自动播放匹配视频！", 2500L)
+                        val isPlaying = ScreenAssistantAccessibilityService.isVideoPlaying() || ScreenAssistantAccessibilityService.isBilibiliOnUpSpace()
+                        if (clickedVideo || isPlaying) {
+                            ScreenActionHud.update("🎬 已搜索并进入视频播放！")
                             "成功在当前屏幕输入框输入「$text」并提交搜索，且已自动为您点击首个匹配的视频卡片进入播放！任务目标已圆满达成！"
                         } else {
-                            "成功在当前屏幕输入框输入「$text」${if (submit) "并触发搜索/提交" else ""}。请调用 inspect_current_screen 查看搜索结果并点击第一个相关视频播放！"
+                            "成功在当前屏幕输入框输入「$text」${if (submit) "并触发搜索/提交" else ""}。当前视频尚未开始播放，请调用 inspect_current_screen 查看搜索结果并点击第一个相关视频卡片播放！"
                         }
                     } else {
                         "输入未成功：未检测到已聚焦的输入框控件。请先调用 operate_screen_click 点击搜索框使其获取焦点，然后再调用 operate_screen_input！"

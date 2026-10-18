@@ -13,17 +13,21 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 
 /**
- * 屏幕操作全局灵动状态条 (Codex-style Screen Action HUD)。
+ * 屏幕操作全局灵动状态条与任务完成通知横幅 (Screen Action HUD)。
  *
- * 当 AI 正在跨应用操作屏幕、调用应用、分析界面或模拟手势时，在屏幕顶端悬浮展示
- * 极简、高辨识度的毛玻璃状态胶囊，实时反馈当前正在执行的具体动作与步骤，
- * 并提供一键【停止】急停按钮，彻底消除用户在 AI 自动化操作时的失控感与不确定感。
+ * 1. 运行态 (Working Mode)：
+ *    在屏幕顶端悬浮墨黑半透明毛玻璃灵动胶囊，实时显示当前动作与步骤，
+ *    提供【停止】急停按钮与【✕】随手关闭按钮，绝不遮挡操作。
+ *
+ * 2. 完成态 (Completion Mode / 任务执行报告)：
+ *    任务结束时自动转换为交互式信息通知横幅，清晰呈现任务标题与执行报告，
+ *    提供【💬 交流】就地展开悬浮对话按钮，以及醒目的【✕】关闭按钮，
+ *    用户可随手点击【✕】一键关闭，彻底消除标志常驻关不掉的困扰。
  */
 object ScreenActionHud {
 
@@ -31,34 +35,32 @@ object ScreenActionHud {
     private var windowManager: WindowManager? = null
     private var hudView: View? = null
 
-    private var iconContainer: FrameLayout? = null
+    private var currentOnStop: (() -> Unit)? = null
+    private var autoDismissRunnable: Runnable? = null
+
+    // 运行态子 View 引用
     private var progressBar: ProgressBar? = null
     private var checkIcon: TextView? = null
     private var statusTextView: TextView? = null
     private var stopButton: TextView? = null
-
-    private var currentOnStop: (() -> Unit)? = null
-    private var autoDismissRunnable: Runnable? = null
+    private var closeButton: TextView? = null
 
     /**
      * 显示正在执行的 HUD 状态条。
-     *
-     * @param context 运行上下文
-     * @param initialText 初始步骤文字，例如：“正在启动哔哩哔哩...”
-     * @param onStopClicked 用户点击【停止】按钮时的回调
      */
     fun show(context: Context, initialText: String, onStopClicked: (() -> Unit)? = null) {
-        mainHandler.post {
+        runOnMain {
             currentOnStop = onStopClicked
-            autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
+            cancelAutoDismiss()
 
-            if (hudView != null && windowManager != null) {
+            if (hudView != null && windowManager != null && statusTextView != null) {
                 updateText(initialText)
                 setWorkingMode()
-                return@post
+                return@runOnMain
             }
 
-            createAndAttachView(context, initialText)
+            dismissInternal()
+            createAndAttachWorkingView(context, initialText)
         }
     }
 
@@ -66,44 +68,35 @@ object ScreenActionHud {
      * 更新当前动作文字（平滑切换）。
      */
     fun update(stepText: String) {
-        mainHandler.post {
+        runOnMain {
+            if (hudView == null || statusTextView == null) return@runOnMain
             updateText(stepText)
             setWorkingMode()
         }
     }
 
     /**
-     * 标记任务完成，展示绿色对勾与成功文案，并在指定延时后自动优雅淡出。
+     * 任务完成统一切换：展示具有任务报告、就地交流按钮与明确【✕】关闭按钮的交互横幅。
+     *
+     * @param context 上下文
+     * @param title 标题（如“🎬 视频已开始播放”或“✅ 任务已圆满完成”）
+     * @param message 详细任务报告摘要
+     * @param autoDismissMs 自动淡出时间（毫秒），默认 8000ms
+     * @param onOpenChat 点击横幅或“💬 交流”按钮时触发就地交流
      */
-    fun complete(message: String, autoDismissDelayMs: Long = 2500L) {
-        mainHandler.post {
-            updateText(message)
-            setCompletedMode()
-
-            autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
-            val dismissTask = Runnable { dismiss() }
-            autoDismissRunnable = dismissTask
-            mainHandler.postDelayed(dismissTask, autoDismissDelayMs)
-        }
-    }
-
-    /**
-     * 在操作任务结束或有重要说明时，在屏幕顶端弹出像信息/通知一样的交互横幅。
-     * 用户点击横幅或“继续交流”按钮，即可立即在当前页面（如B站）就地唤起桌面悬浮窗，继续与 AI 交流！
-     */
-    fun showCompletionBanner(
+    fun showCompletion(
         context: Context,
         title: String = "AI 智能管家",
         message: String,
-        autoDismissMs: Long = 8000L,
-        onOpenChat: () -> Unit
+        autoDismissMs: Long = 8500L,
+        onOpenChat: (() -> Unit)? = null
     ) {
-        mainHandler.post {
-            dismiss()
+        runOnMain {
+            dismissInternal()
 
             val svc = ScreenAssistantAccessibilityService.instance
             val targetContext = svc ?: context.applicationContext
-            val wm = (targetContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@post
+            val wm = (targetContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@runOnMain
             windowManager = wm
 
             val windowType = if (svc != null) {
@@ -111,7 +104,7 @@ object ScreenActionHud {
             } else if (Settings.canDrawOverlays(targetContext)) {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             } else {
-                return@post
+                return@runOnMain
             }
 
             val dm = targetContext.resources.displayMetrics
@@ -131,17 +124,24 @@ object ScreenActionHud {
                     setStroke(dpToPx(targetContext, 1.2f).toInt(), Color.parseColor("#5076A0F8")) // 微蓝光泽边框
                 }
 
-                // 点击整个横幅触发就地唤起悬浮窗交流
+                // 点击横幅主体触发就地交流
                 setOnClickListener {
-                    dismiss()
-                    onOpenChat()
+                    dismissInternal()
+                    onOpenChat?.invoke()
                 }
             }
 
-            // 1. 左侧圆形图标
+            // 1. 左侧图标
+            val isVideo = title.contains("视频") || title.contains("播放")
+            val isLock = title.contains("长时记忆") || title.contains("密码")
+            val iconEmoji = when {
+                isVideo -> "🎬"
+                isLock -> "🔒"
+                else -> "🤖"
+            }
             val iconView = TextView(targetContext).apply {
-                text = "🤖"
-                textSize = 18f
+                text = iconEmoji
+                textSize = 17f
                 gravity = Gravity.CENTER
                 val size = dpToPx(targetContext, 34f).toInt()
                 layoutParams = LinearLayout.LayoutParams(size, size).apply {
@@ -149,12 +149,12 @@ object ScreenActionHud {
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#263855"))
+                    setColor(Color.parseColor(if (isVideo) "#1C2E4A" else "#263855"))
                 }
             }
             banner.addView(iconView)
 
-            // 2. 中间两行文字（标题 + 摘要内容）
+            // 2. 中间文字（标题 + 任务简报）
             val textBox = LinearLayout(targetContext).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -168,7 +168,7 @@ object ScreenActionHud {
             val msgView = TextView(targetContext).apply {
                 text = message
                 setTextColor(Color.parseColor("#CBD5E1"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
                 setPadding(0, dpToPx(targetContext, 2f).toInt(), 0, 0)
@@ -177,26 +177,60 @@ object ScreenActionHud {
             textBox.addView(msgView)
             banner.addView(textBox)
 
-            // 3. 右侧“💬 继续交流”按钮
-            val chatBtn = TextView(targetContext).apply {
-                text = "💬 继续交流"
-                setTextColor(Color.parseColor("#8AB4F8"))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-                val btnHPad = dpToPx(targetContext, 9f).toInt()
-                val btnVPad = dpToPx(targetContext, 5f).toInt()
-                setPadding(btnHPad, btnVPad, btnHPad, btnVPad)
-                val mStart = dpToPx(targetContext, 8f).toInt()
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    marginStart = mStart
-                }
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dpToPx(targetContext, 12f)
-                    setColor(Color.parseColor("#204A85"))
-                    setStroke(dpToPx(targetContext, 0.8f).toInt(), Color.parseColor("#508AB4F8"))
+            // 3. 右侧操作区：【💬 交流】按钮 + 【✕】关闭按钮
+            val actionBox = LinearLayout(targetContext).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginStart = dpToPx(targetContext, 8f).toInt()
                 }
             }
-            banner.addView(chatBtn)
+
+            if (onOpenChat != null) {
+                val chatBtn = TextView(targetContext).apply {
+                    text = "💬 交流"
+                    setTextColor(Color.parseColor("#8AB4F8"))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    val btnHPad = dpToPx(targetContext, 8f).toInt()
+                    val btnVPad = dpToPx(targetContext, 5f).toInt()
+                    setPadding(btnHPad, btnVPad, btnHPad, btnVPad)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = dpToPx(targetContext, 12f)
+                        setColor(Color.parseColor("#204A85"))
+                        setStroke(dpToPx(targetContext, 0.8f).toInt(), Color.parseColor("#508AB4F8"))
+                    }
+                    setOnClickListener {
+                        dismissInternal()
+                        onOpenChat.invoke()
+                    }
+                }
+                actionBox.addView(chatBtn)
+            }
+
+            // 明确的【✕】关闭按钮，随手一戳立即关掉
+            val closeBtn = TextView(targetContext).apply {
+                text = "✕"
+                setTextColor(Color.parseColor("#90A4AE"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                gravity = Gravity.CENTER
+                val size = dpToPx(targetContext, 26f).toInt()
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    marginStart = dpToPx(targetContext, 6f).toInt()
+                }
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#252E3E"))
+                }
+                setOnClickListener {
+                    dismissInternal()
+                }
+            }
+            actionBox.addView(closeBtn)
+            banner.addView(actionBox)
 
             hudView = banner
 
@@ -210,14 +244,12 @@ object ScreenActionHud {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                y = dpToPx(targetContext, 48f).toInt()
+                y = dpToPx(targetContext, 46f).toInt()
             }
 
             try {
                 wm.addView(banner, params)
-                val dismissTask = Runnable { dismiss() }
-                autoDismissRunnable = dismissTask
-                mainHandler.postDelayed(dismissTask, autoDismissMs)
+                scheduleAutoDismiss(autoDismissMs)
             } catch (_: Exception) {
                 hudView = null
                 windowManager = null
@@ -226,17 +258,47 @@ object ScreenActionHud {
     }
 
     /**
+     * 保持向后兼容：调用 complete 即展示统一的完成通知横幅。
+     */
+    fun complete(message: String, autoDismissDelayMs: Long = 8000L) {
+        val svc = ScreenAssistantAccessibilityService.instance
+        if (svc != null) {
+            showCompletion(
+                context = svc,
+                title = "✅ 任务已完成",
+                message = message,
+                autoDismissMs = autoDismissDelayMs
+            )
+        } else {
+            runOnMain {
+                updateText(message)
+                setCompletedMode()
+                scheduleAutoDismiss(autoDismissDelayMs)
+            }
+        }
+    }
+
+    /**
+     * 保持向后兼容：别名方法 showCompletionBanner
+     */
+    fun showCompletionBanner(
+        context: Context,
+        title: String = "AI 智能管家",
+        message: String,
+        autoDismissMs: Long = 8000L,
+        onOpenChat: () -> Unit
+    ) {
+        showCompletion(context, title, message, autoDismissMs, onOpenChat)
+    }
+
+    /**
      * 标记任务中止或失败。
      */
     fun failed(message: String, autoDismissDelayMs: Long = 2500L) {
-        mainHandler.post {
+        runOnMain {
             updateText(message)
             setFailedMode()
-
-            autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
-            val dismissTask = Runnable { dismiss() }
-            autoDismissRunnable = dismissTask
-            mainHandler.postDelayed(dismissTask, autoDismissDelayMs)
+            scheduleAutoDismiss(autoDismissDelayMs)
         }
     }
 
@@ -244,27 +306,50 @@ object ScreenActionHud {
      * 立即移除并隐藏 HUD 状态条。
      */
     fun dismiss() {
-        mainHandler.post {
-            autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
-            autoDismissRunnable = null
-            currentOnStop = null
-
-            val view = hudView
-            val wm = windowManager
-            if (view != null && wm != null) {
-                runCatching { wm.removeViewImmediate(view) }
-            }
-            hudView = null
-            windowManager = null
-            iconContainer = null
-            progressBar = null
-            checkIcon = null
-            statusTextView = null
-            stopButton = null
+        runOnMain {
+            dismissInternal()
         }
     }
 
     fun isShowing(): Boolean = hudView != null
+
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
+
+    private fun cancelAutoDismiss() {
+        autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        autoDismissRunnable = null
+    }
+
+    private fun scheduleAutoDismiss(delayMs: Long) {
+        cancelAutoDismiss()
+        val task = Runnable { dismissInternal() }
+        autoDismissRunnable = task
+        mainHandler.postDelayed(task, delayMs)
+    }
+
+    private fun dismissInternal() {
+        cancelAutoDismiss()
+        currentOnStop = null
+
+        val view = hudView
+        val wm = windowManager
+        if (view != null && wm != null) {
+            runCatching { wm.removeViewImmediate(view) }
+        }
+        hudView = null
+        windowManager = null
+        progressBar = null
+        checkIcon = null
+        statusTextView = null
+        stopButton = null
+        closeButton = null
+    }
 
     private fun updateText(text: String) {
         statusTextView?.text = text
@@ -274,6 +359,7 @@ object ScreenActionHud {
         progressBar?.visibility = View.VISIBLE
         checkIcon?.visibility = View.GONE
         stopButton?.visibility = View.VISIBLE
+        closeButton?.visibility = View.VISIBLE
     }
 
     private fun setCompletedMode() {
@@ -284,6 +370,7 @@ object ScreenActionHud {
             setTextColor(Color.parseColor("#4CAF50"))
         }
         stopButton?.visibility = View.GONE
+        closeButton?.visibility = View.VISIBLE
     }
 
     private fun setFailedMode() {
@@ -294,10 +381,10 @@ object ScreenActionHud {
             setTextColor(Color.parseColor("#EF5350"))
         }
         stopButton?.visibility = View.GONE
+        closeButton?.visibility = View.VISIBLE
     }
 
-    private fun createAndAttachView(context: Context, initialText: String) {
-        // 优先使用已激活的 AccessibilityService 上下文，享有 TYPE_ACCESSIBILITY_OVERLAY 优势（无需额外悬浮窗授权）
+    private fun createAndAttachWorkingView(context: Context, initialText: String) {
         val svc = ScreenAssistantAccessibilityService.instance
         val targetContext = svc ?: context.applicationContext
         val wm = (targetContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return
@@ -308,15 +395,14 @@ object ScreenActionHud {
         } else if (Settings.canDrawOverlays(targetContext)) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
-            // 权限不足时不展示 HUD，避免崩溃
             return
         }
 
         val pillLayout = LinearLayout(targetContext).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            val horizontalPadding = dpToPx(targetContext, 14f).toInt()
-            val verticalPadding = dpToPx(targetContext, 8f).toInt()
+            val horizontalPadding = dpToPx(targetContext, 12f).toInt()
+            val verticalPadding = dpToPx(targetContext, 7f).toInt()
             setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
 
             // Codex-style 墨黑半透明毛玻璃胶囊背景
@@ -328,11 +414,11 @@ object ScreenActionHud {
             }
         }
 
-        // 1. 左侧动态指示器容器
+        // 1. 左侧指示器容器
         val iconBox = FrameLayout(targetContext).apply {
             layoutParams = LinearLayout.LayoutParams(
-                dpToPx(targetContext, 20f).toInt(),
-                dpToPx(targetContext, 20f).toInt()
+                dpToPx(targetContext, 18f).toInt(),
+                dpToPx(targetContext, 18f).toInt()
             )
         }
         val spinner = ProgressBar(targetContext, null, android.R.attr.progressBarStyleSmall).apply {
@@ -343,7 +429,7 @@ object ScreenActionHud {
             )
         }
         val staticIcon = TextView(targetContext).apply {
-            textSize = 14f
+            textSize = 13f
             gravity = Gravity.CENTER
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
@@ -359,27 +445,27 @@ object ScreenActionHud {
         val textView = TextView(targetContext).apply {
             text = initialText
             setTextColor(Color.parseColor("#F0F4F8"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            val margin = dpToPx(targetContext, 10f).toInt()
+            val margin = dpToPx(targetContext, 8f).toInt()
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 setMargins(margin, 0, margin, 0)
             }
         }
         pillLayout.addView(textView)
 
-        // 3. 右侧急停【停止】按钮
+        // 3. 右侧操作区：【停止】按钮 + 【✕】关闭按钮
         val btnStop = TextView(targetContext).apply {
             text = "停止"
             setTextColor(Color.parseColor("#FFCDD2"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            val btnHPadding = dpToPx(targetContext, 10f).toInt()
-            val btnVPadding = dpToPx(targetContext, 4f).toInt()
+            val btnHPadding = dpToPx(targetContext, 8f).toInt()
+            val btnVPadding = dpToPx(targetContext, 3f).toInt()
             setPadding(btnHPadding, btnVPadding, btnHPadding, btnVPadding)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(targetContext, 12f)
+                cornerRadius = dpToPx(targetContext, 10f)
                 setColor(Color.parseColor("#4A1B1B")) // 暗红底
                 setStroke(dpToPx(targetContext, 0.8f).toInt(), Color.parseColor("#D32F2F")) // 鲜红框
             }
@@ -387,19 +473,37 @@ object ScreenActionHud {
                 currentOnStop?.invoke()
                 updateText("已停止自动化操作")
                 setFailedMode()
-                val dismissTask = Runnable { dismiss() }
-                autoDismissRunnable = dismissTask
-                mainHandler.postDelayed(dismissTask, 1200L)
+                scheduleAutoDismiss(1200L)
             }
         }
         pillLayout.addView(btnStop)
 
-        // 保存引用
-        iconContainer = iconBox
+        // 随手一戳立即关闭按钮
+        val btnClose = TextView(targetContext).apply {
+            text = "✕"
+            setTextColor(Color.parseColor("#78909C"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            gravity = Gravity.CENTER
+            val size = dpToPx(targetContext, 22f).toInt()
+            val mStart = dpToPx(targetContext, 5f).toInt()
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                marginStart = mStart
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#222A36"))
+            }
+            setOnClickListener {
+                dismissInternal()
+            }
+        }
+        pillLayout.addView(btnClose)
+
         progressBar = spinner
         checkIcon = staticIcon
         statusTextView = textView
         stopButton = btnStop
+        closeButton = btnClose
         hudView = pillLayout
 
         val params = WindowManager.LayoutParams(
@@ -412,7 +516,7 @@ object ScreenActionHud {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = dpToPx(targetContext, 54f).toInt() // 居于状态栏下方
+            y = dpToPx(targetContext, 52f).toInt()
         }
 
         try {

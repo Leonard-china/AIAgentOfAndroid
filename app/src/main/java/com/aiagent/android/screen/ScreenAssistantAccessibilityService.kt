@@ -2,13 +2,32 @@ package com.aiagent.android.screen
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Context
+import android.graphics.Color
 import android.graphics.Path
+import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.EditText
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
+import android.widget.TextView
+import com.aiagent.android.AIAgentApplication
+import com.aiagent.android.floating.FloatingAssistantManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -220,6 +239,81 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         }
 
         /**
+         * 检测当前是否在 B站 UP主个人空间（如 3Blue1Brown 的空间主页/投稿页）
+         */
+        fun isBilibiliOnUpSpace(): Boolean {
+            val svc = instance ?: return false
+            val root = svc.rootInActiveWindow ?: return false
+            if (root.findAccessibilityNodeInfosByText("播放全部").isNotEmpty()) return true
+            val hasSubmission = root.findAccessibilityNodeInfosByText("投稿").isNotEmpty()
+            val hasSpaceSignals = root.findAccessibilityNodeInfosByText("主页").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("充电").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("关注").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("已关注").isNotEmpty() ||
+                    root.findAccessibilityNodeInfosByText("动态").isNotEmpty()
+            return hasSubmission && hasSpaceSignals
+        }
+
+        /**
+         * 在 UP主个人空间内自动点击“播放全部”或第一条投稿视频进入播放详情页
+         */
+        fun playVideoFromUpSpace(): Boolean {
+            val svc = instance ?: return false
+            val root = svc.rootInActiveWindow ?: return false
+            val dm = svc.resources.displayMetrics
+            val bounds = Rect()
+
+            // 1. 优先寻找“播放全部”按钮并点击
+            val playAllNodes = root.findAccessibilityNodeInfosByText("播放全部")
+            if (playAllNodes.isNotEmpty()) {
+                val node = playAllNodes[0]
+                node.getBoundsInScreen(bounds)
+                if (svc.clickNodeOrParent(node) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())) {
+                    Log.i(TAG, "playVideoFromUpSpace: Clicked '播放全部' @(${bounds.centerX()}, ${bounds.centerY()})")
+                    return true
+                }
+            }
+
+            // 2. 寻找投稿列表中的第一个视频标题节点
+            fun findFirstVideo(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+                if (node == null || depth > 16) return null
+                val text = node.text?.toString() ?: node.contentDescription?.toString()
+                if (text != null && text.length in 6..120) {
+                    node.getBoundsInScreen(bounds)
+                    if (bounds.top > dm.heightPixels * 0.45f && bounds.width() > dm.widthPixels * 0.35f) {
+                        val isExcluded = text.contains("播放全部") || text.contains("最新发布") || text.contains("筛选") ||
+                                text.contains("置顶") || text.contains("充电") || text.contains("关注") ||
+                                text.contains("主页") || text.contains("动态") || text.contains("投稿") || text.contains("小店")
+                        if (!isExcluded) {
+                            return node
+                        }
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = node.getChild(i)
+                    val found = findFirstVideo(child, depth + 1)
+                    if (found != null) return found
+                }
+                return null
+            }
+
+            val vid = findFirstVideo(root, 0)
+            if (vid != null) {
+                vid.getBoundsInScreen(bounds)
+                val ok = svc.clickNodeOrParent(vid) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                if (ok) {
+                    Log.i(TAG, "playVideoFromUpSpace: Clicked video '${vid.text}' @(${bounds.centerX()}, ${bounds.centerY()})")
+                    return true
+                }
+            }
+
+            // 3. 坐标保底：UP主空间投稿列表首个视频项 (width * 0.5f, height * 0.72f)
+            val coordOk = clickAt(dm.widthPixels * 0.5f, dm.heightPixels * 0.72f)
+            Log.i(TAG, "playVideoFromUpSpace coordinate tap fallback @(0.5f, 0.72f) -> $coordOk")
+            return coordOk
+        }
+
+        /**
          * 在当前界面的活跃输入框中输入文本，并可选提交（点击搜索或回车）
          */
         fun inputText(text: String, submit: Boolean = true): Boolean {
@@ -318,7 +412,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         }
 
         /**
-         * 在搜索结果页自动寻找并点击首个视频卡片进入播放
+         * 无论在搜索结果页还是在 UP主个人空间页，都精准定位并点击视频卡片进入播放闭环
          */
         fun clickFirstVideoCardInSearchResults(): Boolean {
             val svc = instance ?: return false
@@ -328,43 +422,61 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
             val height = dm.heightPixels.toFloat()
             val bounds = Rect()
 
-            // 1. 寻找搜索结果列表中的视频卡片节点
-            fun findVideoNode(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+            // 0. 特征检测 A：如果已经进入了 UP主个人空间，直接播放视频
+            if (isBilibiliOnUpSpace()) {
+                val ok = playVideoFromUpSpace()
+                if (ok) {
+                    try { Thread.sleep(900L) } catch (_: InterruptedException) {}
+                    return true
+                }
+            }
+
+            // 1. 在通用搜索结果列表中寻找真正的视频卡片（严格过滤掉 UP主名片，UP主名片包含粉丝、充电、认证、关注等）
+            fun findSearchVideoNode(node: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
                 if (node == null || depth > 16) return null
                 val text = node.text?.toString() ?: node.contentDescription?.toString()
-                if (text != null && text.length in 5..80 &&
-                    !text.contains("综合") && !text.contains("番剧") && !text.contains("筛选") &&
-                    !text.contains("关注") && !text.contains("动态") && !text.contains("会员购")
-                ) {
+                if (text != null && text.length in 6..100) {
                     node.getBoundsInScreen(bounds)
-                    if (bounds.width() > width * 0.35f && bounds.top in (height * 0.10f).toInt()..(height * 0.60f).toInt()) {
-                        return node
+                    if (bounds.width() > width * 0.35f && bounds.top in (height * 0.10f).toInt()..(height * 0.85f).toInt()) {
+                        val isUpCard = text.contains("粉丝") || text.contains("充电") || text.contains("认证") ||
+                                text.contains("关注") || text.contains("综合") || text.contains("番剧") ||
+                                text.contains("筛选") || text.contains("会员购") || text.contains("动态") ||
+                                text.contains("小店")
+                        if (!isUpCard) {
+                            return node
+                        }
                     }
                 }
                 for (i in 0 until node.childCount) {
                     val child = node.getChild(i)
-                    val found = findVideoNode(child, depth + 1)
+                    val found = findSearchVideoNode(child, depth + 1)
                     if (found != null) return found
                 }
                 return null
             }
 
-            val videoNode = findVideoNode(root, 0)
+            val videoNode = findSearchVideoNode(root, 0)
             if (videoNode != null) {
                 videoNode.getBoundsInScreen(bounds)
                 val clicked = svc.clickNodeOrParent(videoNode) || clickAt(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                if (clicked) {
-                    Log.i(TAG, "clickFirstVideoCardInSearchResults found and clicked: ${videoNode.text ?: videoNode.contentDescription}")
-                    return true
-                }
+                Log.i(TAG, "clickFirstVideoCardInSearchResults found and clicked: ${videoNode.text ?: videoNode.contentDescription} -> $clicked")
+            } else {
+                // 坐标保底：点击搜索结果第 1 个视频项 (width * 0.5f, height * 0.42f) 避开顶部的 UP主名片
+                val coordOk = clickAt(width * 0.5f, height * 0.42f)
+                Log.i(TAG, "clickFirstVideoCard coordinate tap fallback @(0.5f, 0.42f) -> $coordOk")
             }
 
-            // 2. 坐标保底：首个搜索结果视频卡片物理中心 (width * 0.5f, height * 0.28f)
-            val fallbackX = width * 0.5f
-            val fallbackY = height * 0.28f
-            val coordOk = clickAt(fallbackX, fallbackY)
-            Log.i(TAG, "clickFirstVideoCardInSearchResults coordinate tap fallback -> $coordOk")
-            return coordOk
+            // 等待页面过渡渲染
+            try { Thread.sleep(1000L) } catch (_: InterruptedException) {}
+
+            // 自愈校验：若点击误入了 UP主个人空间（例如点中了 UP主名片），继续执行空间内播放
+            if (isBilibiliOnUpSpace()) {
+                Log.i(TAG, "Landed on UP space after click, auto continuing playVideoFromUpSpace()...")
+                playVideoFromUpSpace()
+                try { Thread.sleep(900L) } catch (_: InterruptedException) {}
+            }
+
+            return isVideoPlaying() || isBilibiliOnUpSpace()
         }
 
         private fun findFirstEditableNode(node: AccessibilityNodeInfo, depth: Int = 0): AccessibilityNodeInfo? {
@@ -578,8 +690,11 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
             traverse(root, 0)
 
             val builder = StringBuilder()
+            val isUpSpace = isBilibiliOnUpSpace()
             if (isPlaying) {
                 builder.append("🎬【状态判定】：检测到屏幕正处于视频播放详情页！已达成视频播放目标！\n\n")
+            } else if (isUpSpace) {
+                builder.append("📺【状态判定】：当前已进入 UP 主个人空间主页！请调用 operate_screen_click 点击「播放全部」或者点击首个投稿视频卡片进入播放！\n\n")
             } else if (isOnMyPage) {
                 builder.append("⚠️【状态判定】：当前停留在「我的」个人中心界面，并非视频播放页。请点击「首页」返回推荐流或点击搜索框寻找视频！\n\n")
             }
@@ -593,6 +708,294 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
 
             Log.d(TAG, "inspectScreenSummary generated (${items.size} items, isPlaying=$isPlaying, isOnMyPage=$isOnMyPage)")
             return builder.toString()
+        }
+
+        private var quickChatView: View? = null
+        private var quickChatWm: WindowManager? = null
+
+        /**
+         * 立即收起并销毁就地快速交流弹窗。
+         */
+        fun hideQuickChatOverlay() {
+            val handler = Handler(Looper.getMainLooper())
+            handler.post {
+                val view = quickChatView
+                val wm = quickChatWm
+                if (view != null && wm != null) {
+                    runCatching { wm.removeViewImmediate(view) }
+                }
+                quickChatView = null
+                quickChatWm = null
+            }
+        }
+
+        /**
+         * 在当前任何第三方页面（如B站、微信）通过 TYPE_ACCESSIBILITY_OVERLAY 就地弹出 AI 对话交流面板。
+         * 享有无障碍原生顶层图层特权，即便未手动开启悬浮窗权限，也能 100% 顺畅弹出并与用户交流。
+         */
+        fun showQuickChatOverlay(
+            context: Context,
+            summary: String = "",
+            onSend: ((String) -> Unit)? = null
+        ) {
+            val handler = Handler(Looper.getMainLooper())
+            handler.post {
+                hideQuickChatOverlay()
+
+                val svc = instance ?: return@post
+                val wm = (svc.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: return@post
+                quickChatWm = wm
+
+                val dm = svc.resources.displayMetrics
+                val cardWidth = (dm.widthPixels * 0.94f).toInt()
+
+                val cardLayout = LinearLayout(svc).apply {
+                    orientation = LinearLayout.VERTICAL
+                    val pad = dpToPx(svc, 14f).toInt()
+                    setPadding(pad, pad, pad, pad)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = dpToPx(svc, 20f)
+                        setColor(Color.parseColor("#F6121724")) // 墨黑毛玻璃
+                        setStroke(dpToPx(svc, 1.2f).toInt(), Color.parseColor("#5076A0F8"))
+                    }
+                }
+
+                // 1. 顶部标题栏
+                val headerLayout = LinearLayout(svc).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        bottomMargin = dpToPx(svc, 8f).toInt()
+                    }
+                }
+
+                val titleTv = TextView(svc).apply {
+                    text = "🤖 AI 助手就地交流"
+                    setTextColor(Color.parseColor("#FFFFFF"))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                headerLayout.addView(titleTv)
+
+                val closeTv = TextView(svc).apply {
+                    text = "✕"
+                    setTextColor(Color.parseColor("#90A4AE"))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    gravity = Gravity.CENTER
+                    val size = dpToPx(svc, 26f).toInt()
+                    layoutParams = LinearLayout.LayoutParams(size, size)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(Color.parseColor("#263242"))
+                    }
+                    setOnClickListener {
+                        hideQuickChatOverlay()
+                    }
+                }
+                headerLayout.addView(closeTv)
+                cardLayout.addView(headerLayout)
+
+                // 2. 状态简报提示
+                if (summary.isNotBlank()) {
+                    val summaryTv = TextView(svc).apply {
+                        text = summary
+                        setTextColor(Color.parseColor("#94A3B8"))
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                        maxLines = 2
+                        val hP = dpToPx(svc, 9f).toInt()
+                        val vP = dpToPx(svc, 5f).toInt()
+                        setPadding(hP, vP, hP, vP)
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.RECTANGLE
+                            cornerRadius = dpToPx(svc, 10f)
+                            setColor(Color.parseColor("#182133"))
+                        }
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            bottomMargin = dpToPx(svc, 8f).toInt()
+                        }
+                    }
+                    cardLayout.addView(summaryTv)
+                }
+
+                // 3. 快捷指令横滑气泡
+                val chipScroll = HorizontalScrollView(svc).apply {
+                    isHorizontalScrollBarEnabled = false
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        bottomMargin = dpToPx(svc, 10f).toInt()
+                    }
+                }
+                val chipRow = LinearLayout(svc).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                }
+
+                val quickActions = listOf(
+                    "🎬 换一个视频",
+                    "⛶ 全屏播放",
+                    "⏸ 暂停/继续",
+                    "⬅ 返回推荐首页",
+                    "📱 授权完整悬浮窗"
+                )
+
+                fun sendQuery(text: String) {
+                    hideQuickChatOverlay()
+                    if (onSend != null) {
+                        onSend.invoke(text)
+                    } else {
+                        executeDefaultFollowupGoal(svc, text)
+                    }
+                }
+
+                for (act in quickActions) {
+                    val chip = TextView(svc).apply {
+                        text = act
+                        setTextColor(Color.parseColor("#93C5FD"))
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                        val hP = dpToPx(svc, 9f).toInt()
+                        val vP = dpToPx(svc, 5f).toInt()
+                        setPadding(hP, vP, hP, vP)
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.RECTANGLE
+                            cornerRadius = dpToPx(svc, 12f)
+                            setColor(Color.parseColor("#1E293B"))
+                            setStroke(dpToPx(svc, 0.8f).toInt(), Color.parseColor("#3B82F6"))
+                        }
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            marginEnd = dpToPx(svc, 6f).toInt()
+                        }
+                        setOnClickListener {
+                            if (act.contains("完整悬浮窗")) {
+                                FloatingAssistantManager.requestOverlayPermission(svc)
+                            } else {
+                                val cleanPrompt = act.replace(Regex("^[\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\u2600-\\u26FF\\u2700-\\u27BF]+\\s*"), "")
+                                sendQuery(cleanPrompt)
+                            }
+                        }
+                    }
+                    chipRow.addView(chip)
+                }
+                chipScroll.addView(chipRow)
+                cardLayout.addView(chipScroll)
+
+                // 4. 输入框与发送按钮
+                val inputLayout = LinearLayout(svc).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                }
+
+                val editText = EditText(svc).apply {
+                    hint = "输入你想让 AI 做的事..."
+                    setHintTextColor(Color.parseColor("#64748B"))
+                    setTextColor(Color.parseColor("#F1F5F9"))
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+                    val hP = dpToPx(svc, 10f).toInt()
+                    val vP = dpToPx(svc, 7f).toInt()
+                    setPadding(hP, vP, hP, vP)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = dpToPx(svc, 10f)
+                        setColor(Color.parseColor("#1E293B"))
+                        setStroke(dpToPx(svc, 1f).toInt(), Color.parseColor("#334155"))
+                    }
+                    isSingleLine = true
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+                inputLayout.addView(editText)
+
+                val sendBtn = TextView(svc).apply {
+                    text = "发送"
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    val hP = dpToPx(svc, 13f).toInt()
+                    val vP = dpToPx(svc, 7f).toInt()
+                    setPadding(hP, vP, hP, vP)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = dpToPx(svc, 10f)
+                        setColor(Color.parseColor("#2563EB"))
+                    }
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        marginStart = dpToPx(svc, 7f).toInt()
+                    }
+                    setOnClickListener {
+                        val input = editText.text?.toString()?.trim() ?: ""
+                        if (input.isNotEmpty()) {
+                            sendQuery(input)
+                        }
+                    }
+                }
+                inputLayout.addView(sendBtn)
+                cardLayout.addView(inputLayout)
+
+                quickChatView = cardLayout
+
+                val params = WindowManager.LayoutParams(
+                    cardWidth,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    y = dpToPx(svc, 28f).toInt()
+                    softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                }
+
+                try {
+                    wm.addView(cardLayout, params)
+                } catch (e: Exception) {
+                    Log.e(TAG, "showQuickChatOverlay failed to add view", e)
+                    quickChatView = null
+                    quickChatWm = null
+                }
+            }
+        }
+
+        private fun executeDefaultFollowupGoal(context: Context, prompt: String) {
+            ScreenActionHud.show(context, "正在执行: \"$prompt\"...")
+            CoroutineScope(Dispatchers.Main).launch {
+                try {
+                    val orchestrator = AIAgentApplication.instance.orchestrator
+                    orchestrator.processGoal(
+                        userPrompt = prompt,
+                        onStepUpdated = { steps ->
+                            steps.lastOrNull()?.let { lastStep ->
+                                ScreenActionHud.update(lastStep.detail.ifBlank { lastStep.title })
+                            }
+                        }
+                    )
+                } catch (e: Exception) {
+                    ScreenActionHud.failed("执行出错: ${e.message}")
+                }
+            }
+        }
+
+        private fun dpToPx(context: Context, dp: Float): Float {
+            return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, context.resources.displayMetrics)
         }
     }
 
@@ -616,6 +1019,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        hideQuickChatOverlay()
         isConnected = false
         instance = null
         Log.w(TAG, "ScreenAssistantAccessibilityService destroyed.")
