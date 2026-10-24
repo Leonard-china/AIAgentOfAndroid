@@ -839,5 +839,5 @@
     - 文件大小：46,236,369 bytes；
     - SHA-256：`40CB95047CC48BC51AA623701AEDCBB0DA7BD863A2E46CFEE98B164D0220586C`。
 - **已知事项与后续**：
-  - Git 提交并推送至 `origin/master`；
+  - Git 提交标识：`94c91b3`；
   - 发布 GitHub Release `v1.1.0` 并挂载 `app-release.apk`。

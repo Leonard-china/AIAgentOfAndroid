@@ -11,6 +11,7 @@
   4. **多模型服务商 API Key 独立加密隔离与自动记忆还原**全量落地并完成真机实测验证。
 - **真机设备**：荣耀 VKJ-AN00 / Android 16（设备号 `AXRBUT6520002413` 在线）。
 - **最新 Release APK**：`app/build/outputs/apk/release/app-release.apk`（46,236,369 bytes），Package：`com.aiagent.android`（v1.1.0 / versionCode 2），SHA-256：`40CB95047CC48BC51AA623701AEDCBB0DA7BD863A2E46CFEE98B164D0220586C`。
+- **最新提交**：`94c91b3`（包含 v1.1.0 全量代码、架构与发布配置）。
 - **最新 Debug APK**：`app/build/outputs/apk/debug/app-debug.apk`（64,705,744 bytes），Package：`com.aiagent.android.debug`。
 - **安装与运行状态**：ADB 安装 `Success`；通过 ADB 设置重新激活无障碍服务，真机 logcat 确认 `ScreenAssistantAccessibilityService connected successfully.`。MainActivity 正常运行。
 
