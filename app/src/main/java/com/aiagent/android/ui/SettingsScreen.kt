@@ -6,8 +6,10 @@ import android.os.Build
 import android.os.Environment
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -43,9 +45,41 @@ fun SettingsScreen(
     var isOfflinePreferred by remember { mutableStateOf(vault.isOfflinePreferred()) }
     var isScreenAssistantEnabled by remember { mutableStateOf(vault.isScreenAssistantEnabled()) }
 
+    var visionEnabled by remember { mutableStateOf(vault.isVisionEnabled()) }
+    var useCustomVision by remember { mutableStateOf(vault.getVisionBaseUrl().isNotBlank() || vault.getVisionApiKeyOverride().isNotBlank()) }
+    var visionModel by remember { mutableStateOf(vault.getVisionModel()) }
+    var visionBaseUrl by remember { mutableStateOf(vault.getVisionBaseUrl()) }
+    var visionApiKey by remember { mutableStateOf(vault.getVisionApiKeyOverride()) }
+    var requestVisionConsent by remember { mutableStateOf(false) }
+
     var showPassword by remember { mutableStateOf(false) }
+    var showVisionPassword by remember { mutableStateOf(false) }
+
     var isTestingConnection by remember { mutableStateOf(false) }
     var connectionTestResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var saveFeedback by remember { mutableStateOf<String?>(null) }
+
+    var isTestingVision by remember { mutableStateOf(false) }
+    var visionTestResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var visionSaveFeedback by remember { mutableStateOf<String?>(null) }
+
+    if (requestVisionConsent) {
+        AlertDialog(
+            onDismissRequest = { requestVisionConsent = false },
+            title = { Text("开启截图视觉理解？") },
+            text = { Text("开启后，你发起的任务可按需把当前应用截图发送给配置的视觉模型。截图只在端侧内存中处理并销毁，不写入相册；检测到密码输入或系统安全画面时会自动拒绝截屏。可以随时关闭。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    visionEnabled = true
+                    vault.setVisionEnabled(true)
+                    requestVisionConsent = false
+                }) { Text("了解并开启") }
+            },
+            dismissButton = {
+                TextButton(onClick = { requestVisionConsent = false }) { Text("暂不开启") }
+            }
+        )
+    }
 
     val hasAllFilesAccess = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -54,6 +88,38 @@ fun SettingsScreen(
     }
 
     val isAccessibilityActive by ScreenAssistantAccessibilityService.connectionState.collectAsState()
+
+    fun selectPreset(presetName: String, targetBaseUrl: String, targetModel: String, isVisionSupported: Boolean = false) {
+        val cleanCurrentUrl = LlmClient.cleanBaseUrl(baseUrl)
+        val cleanCurrentKey = LlmClient.cleanApiKey(apiKey)
+        val oldProvider = vault.getProviderId(cleanCurrentUrl)
+        if (cleanCurrentKey.isNotBlank()) {
+            vault.saveApiKeyForProvider(oldProvider, cleanCurrentKey)
+        }
+
+        val cleanTargetUrl = LlmClient.cleanBaseUrl(targetBaseUrl)
+        val newProvider = vault.getProviderId(cleanTargetUrl)
+        val targetKey = vault.getApiKeyForProvider(newProvider)
+
+        baseUrl = cleanTargetUrl
+        modelName = targetModel
+        apiKey = targetKey
+
+        if (isVisionSupported && visionModel.isBlank()) {
+            visionModel = targetModel
+        }
+
+        vault.saveBaseUrl(cleanTargetUrl)
+        vault.saveModelName(targetModel)
+        vault.saveApiKey(targetKey)
+
+        connectionTestResult = null
+        if (targetKey.isNotBlank()) {
+            saveFeedback = "已自动切换为【$presetName】的已保存密钥"
+        } else {
+            saveFeedback = "已切换为【$presetName】（尚未配置密钥，请在下方粘贴并保存）"
+        }
+    }
 
     LazyColumn(
         modifier = modifier
@@ -84,69 +150,63 @@ fun SettingsScreen(
                         Text(text = "大模型连接配置", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
                     Text(
-                        text = "支持接入任意 OpenAI 兼容协议服务商（如 DeepSeek、通义千问等）。密钥通过硬件 Keystore 本地加密保存。",
+                        text = "支持接入任意 OpenAI 兼容服务商（如 DeepSeek、通义千问等）。密钥通过硬件 Keystore 本地加密保存。",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                        modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
                     )
+
+                    Text("快速选择服务商预设（可左右滑动）：", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    val presets = remember {
+                        listOf(
+                            Triple("DeepSeek V3 (推荐)", "https://api.deepseek.com/v1", "deepseek-chat"),
+                            Triple("DeepSeek R1 (推理)", "https://api.deepseek.com/v1", "deepseek-reasoner"),
+                            Triple("通义千问 Max", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max"),
+                            Triple("通义千问 Plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+                            Triple("千问 VL (多模态)", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-vl-max"),
+                            Triple("GPT-4o", "https://api.openai.com/v1", "gpt-4o"),
+                            Triple("智谱 GLM-4", "https://open.bigmodel.cn/api/paas/v4", "glm-4")
+                        )
+                    }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        FilterChip(
-                            selected = modelName == "deepseek-chat",
-                            onClick = {
-                                baseUrl = "https://api.deepseek.com/v1"
-                                modelName = "deepseek-chat"
-                                vault.saveBaseUrl(baseUrl)
-                                vault.saveModelName(modelName)
-                            },
-                            label = { Text("DeepSeek V3 (首选推荐)", fontSize = 11.sp) }
-                        )
-                        FilterChip(
-                            selected = modelName == "deepseek-reasoner",
-                            onClick = {
-                                baseUrl = "https://api.deepseek.com/v1"
-                                modelName = "deepseek-reasoner"
-                                vault.saveBaseUrl(baseUrl)
-                                vault.saveModelName(modelName)
-                            },
-                            label = { Text("DeepSeek R1", fontSize = 11.sp) }
-                        )
-                        FilterChip(
-                            selected = modelName.contains("qwen"),
-                            onClick = {
-                                baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                                modelName = "qwen-max"
-                                vault.saveBaseUrl(baseUrl)
-                                vault.saveModelName(modelName)
-                            },
-                            label = { Text("千问 Max", fontSize = 11.sp) }
-                        )
-                        FilterChip(
-                            selected = modelName == "gpt-4o",
-                            onClick = {
-                                baseUrl = "https://api.openai.com/v1"
-                                modelName = "gpt-4o"
-                                vault.saveBaseUrl(baseUrl)
-                                vault.saveModelName(modelName)
-                            },
-                            label = { Text("GPT-4o", fontSize = 11.sp) }
-                        )
+                        presets.forEach { (name, url, model) ->
+                            FilterChip(
+                                selected = modelName == model && baseUrl == url,
+                                onClick = {
+                                    selectPreset(name, url, model, model.contains("vl") || model.contains("4o"))
+                                },
+                                label = { Text(name, fontSize = 12.sp) }
+                            )
+                        }
                     }
 
                     OutlinedTextField(
                         value = baseUrl,
                         onValueChange = {
                             baseUrl = it
-                            vault.saveBaseUrl(it)
+                            saveFeedback = null
+                            connectionTestResult = null
                         },
                         label = { Text("接口 Base URL") },
+                        placeholder = { Text("如 https://api.deepseek.com/v1") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        trailingIcon = {
+                            if (baseUrl.isNotBlank()) {
+                                IconButton(onClick = { baseUrl = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "清空")
+                                }
+                            }
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -155,18 +215,36 @@ fun SettingsScreen(
                         value = apiKey,
                         onValueChange = {
                             apiKey = it
-                            vault.saveApiKey(it)
+                            saveFeedback = null
+                            connectionTestResult = null
                         },
-                        label = { Text("API Key") },
+                        label = {
+                            val providerName = when (vault.getProviderId(baseUrl)) {
+                                "deepseek" -> "DeepSeek"
+                                "dashscope" -> "通义千问 / 百炼"
+                                "openai" -> "OpenAI"
+                                "zhipu" -> "智谱 AI"
+                                else -> "服务商"
+                            }
+                            Text("API Key ($providerName 专属密钥)")
+                        },
+                        placeholder = { Text("通常以 sk- 开头，直接粘贴即可") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                         trailingIcon = {
-                            IconButton(onClick = { showPassword = !showPassword }) {
-                                Icon(
-                                    imageVector = if (showPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = null
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (apiKey.isNotBlank()) {
+                                    IconButton(onClick = { apiKey = "" }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "清空")
+                                    }
+                                }
+                                IconButton(onClick = { showPassword = !showPassword }) {
+                                    Icon(
+                                        imageVector = if (showPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (showPassword) "隐藏" else "查看"
+                                    )
+                                }
                             }
                         }
                     )
@@ -177,9 +255,11 @@ fun SettingsScreen(
                         value = modelName,
                         onValueChange = {
                             modelName = it
-                            vault.saveModelName(it)
+                            saveFeedback = null
+                            connectionTestResult = null
                         },
-                        label = { Text("模型名称 (如 gpt-4o-mini, deepseek-chat)") },
+                        label = { Text("模型名称") },
+                        placeholder = { Text("如 deepseek-chat 或 qwen-max") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -188,41 +268,85 @@ fun SettingsScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
                             onClick = {
+                                val cleanUrl = LlmClient.cleanBaseUrl(baseUrl)
+                                val cleanKey = LlmClient.cleanApiKey(apiKey)
+                                val cleanModel = modelName.trim()
+                                baseUrl = cleanUrl
+                                apiKey = cleanKey
+                                modelName = cleanModel
+                                vault.saveBaseUrl(cleanUrl)
+                                vault.saveApiKey(cleanKey)
+                                vault.saveModelName(cleanModel)
+                                val provider = vault.getProviderId(cleanUrl)
+                                vault.saveApiKeyForProvider(provider, cleanKey)
+                                saveFeedback = "【${provider.uppercase()}】专属密钥已加密保存！"
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("保存配置")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val cleanUrl = LlmClient.cleanBaseUrl(baseUrl)
+                                val cleanKey = LlmClient.cleanApiKey(apiKey)
+                                val cleanModel = modelName.trim()
+                                baseUrl = cleanUrl
+                                apiKey = cleanKey
+                                modelName = cleanModel
+                                vault.saveBaseUrl(cleanUrl)
+                                vault.saveApiKey(cleanKey)
+                                vault.saveModelName(cleanModel)
+                                val provider = vault.getProviderId(cleanUrl)
+                                vault.saveApiKeyForProvider(provider, cleanKey)
+                                saveFeedback = "配置已自动保存"
+
                                 coroutineScope.launch {
                                     isTestingConnection = true
                                     connectionTestResult = null
-                                    val client = LlmClient(baseUrl, apiKey, modelName)
+                                    val client = LlmClient(cleanUrl, cleanKey, cleanModel)
                                     val res = client.testConnection()
                                     connectionTestResult = res
                                     isTestingConnection = false
                                 }
                             },
-                            enabled = !isTestingConnection && apiKey.isNotBlank()
+                            enabled = !isTestingConnection && apiKey.isNotBlank(),
+                            modifier = Modifier.weight(1f)
                         ) {
                             if (isTestingConnection) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                            } else {
+                                Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
                             Text("测试连接")
                         }
                     }
 
+                    saveFeedback?.let { msg ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = "✓ $msg", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+
                     connectionTestResult?.let { (success, msg) ->
                         Spacer(modifier = Modifier.height(8.dp))
                         Surface(
                             color = if (success) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 text = msg,
                                 fontSize = 12.sp,
-                                modifier = Modifier.padding(8.dp),
+                                modifier = Modifier.padding(10.dp),
                                 color = if (success) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
@@ -246,6 +370,201 @@ fun SettingsScreen(
                                 vault.setOfflinePreferred(it)
                             }
                         )
+                    }
+                }
+            }
+        }
+
+        // Section: Vision Configuration
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Visibility, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("截图视觉理解（多模态）", fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = visionEnabled,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    requestVisionConsent = true
+                                } else {
+                                    visionEnabled = false
+                                    vault.setVisionEnabled(false)
+                                    if (com.aiagent.android.AIAgentApplication.instance.conversation.isProcessing) {
+                                        com.aiagent.android.AIAgentApplication.instance.conversation.stop()
+                                    }
+                                }
+                            }
+                        )
+                    }
+
+                    Text(
+                        "用于无障碍控件树无法读取的自绘画面（如游戏、自绘 Canvas、无标签图标）。默认关闭；需要配置支持图片输入的多模态模型。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (visionEnabled) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "使用独立的第三方视觉服务商",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = useCustomVision,
+                                onCheckedChange = { custom ->
+                                    useCustomVision = custom
+                                    if (!custom) {
+                                        visionBaseUrl = ""
+                                        visionApiKey = ""
+                                        vault.saveVisionBaseUrl("")
+                                        vault.saveVisionApiKeyOverride("")
+                                    }
+                                }
+                            )
+                        }
+
+                        if (!useCustomVision) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "已启用：自动沿用主模型的 Base URL 与 API Key（无需重复填写密钥）。只需确保模型支持图片输入即可。",
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(10.dp),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = visionModel,
+                            onValueChange = {
+                                visionModel = it
+                                vault.saveVisionModel(it)
+                                visionSaveFeedback = null
+                                visionTestResult = null
+                            },
+                            label = { Text("视觉模型名称 (如 qwen-vl-max 或 gpt-4o)") },
+                            placeholder = { Text("如 qwen-vl-max") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        if (useCustomVision) {
+                            OutlinedTextField(
+                                value = visionBaseUrl,
+                                onValueChange = {
+                                    visionBaseUrl = it
+                                    visionSaveFeedback = null
+                                    visionTestResult = null
+                                },
+                                label = { Text("独立视觉接口 Base URL") },
+                                placeholder = { Text("如 https://dashscope.aliyuncs.com/compatible-mode/v1") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = visionApiKey,
+                                onValueChange = {
+                                    visionApiKey = it
+                                    visionSaveFeedback = null
+                                    visionTestResult = null
+                                },
+                                label = { Text("独立视觉接口 API Key") },
+                                singleLine = true,
+                                visualTransformation = if (showVisionPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { showVisionPassword = !showVisionPassword }) {
+                                        Icon(
+                                            imageVector = if (showVisionPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = if (showVisionPassword) "隐藏" else "查看"
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(
+                                onClick = {
+                                    vault.saveVisionModel(visionModel.trim())
+                                    if (useCustomVision) {
+                                        vault.saveVisionBaseUrl(LlmClient.cleanBaseUrl(visionBaseUrl))
+                                        vault.saveVisionApiKeyOverride(LlmClient.cleanApiKey(visionApiKey))
+                                    } else {
+                                        vault.saveVisionBaseUrl("")
+                                        vault.saveVisionApiKeyOverride("")
+                                    }
+                                    visionSaveFeedback = "视觉配置已保存！"
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("保存视觉配置")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val vModel = visionModel.trim()
+                                    val vUrl = if (useCustomVision && visionBaseUrl.isNotBlank()) LlmClient.cleanBaseUrl(visionBaseUrl) else vault.getBaseUrl()
+                                    val vKey = if (useCustomVision && visionApiKey.isNotBlank()) LlmClient.cleanApiKey(visionApiKey) else vault.getApiKey()
+
+                                    coroutineScope.launch {
+                                        isTestingVision = true
+                                        visionTestResult = null
+                                        val client = LlmClient(vUrl, vKey, vModel)
+                                        val res = client.testVisionConnection()
+                                        visionTestResult = res
+                                        isTestingVision = false
+                                    }
+                                },
+                                enabled = !isTestingVision && visionModel.isNotBlank(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isTestingVision) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Text("测试视觉连接")
+                            }
+                        }
+
+                        visionSaveFeedback?.let { msg ->
+                            Text(text = "✓ $msg", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+
+                        visionTestResult?.let { (success, msg) ->
+                            Surface(
+                                color = if (success) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = msg,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(10.dp),
+                                    color = if (success) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
                     }
                 }
             }

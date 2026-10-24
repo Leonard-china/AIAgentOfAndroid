@@ -71,6 +71,7 @@ enum class PlanStatus {
     EXECUTING,
     SUCCESS,
     PARTIAL_SUCCESS,
+    STALE,
     FAILED,
     CANCELLED
 }

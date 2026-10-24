@@ -99,12 +99,87 @@ class KeyStoreVault(private val context: Context) {
         }
     }
 
+    /** Conversation storage must fail closed instead of treating an unreadable archive as empty. */
+    fun sealLocalPayload(plainText: String): String {
+        require(plainText.isNotBlank())
+        return encrypt(plainText).also { check(it.isNotBlank()) { "会话加密失败" } }
+    }
+
+    fun openLocalPayload(encrypted: String): String = decrypt(encrypted).also {
+        check(it.isNotBlank()) { "本地会话密钥不可用或数据损坏；已保留会话文件。" }
+    }
+
+    fun isVisionEnabled(): Boolean = prefs.getBoolean("vision_enabled", false)
+    fun setVisionEnabled(enabled: Boolean) { prefs.edit().putBoolean("vision_enabled", enabled).apply() }
+    fun getVisionModel(): String = prefs.getString("vision_model", "").orEmpty()
+    fun saveVisionModel(model: String) { prefs.edit().putString("vision_model", model.trim()).apply() }
+    fun getVisionBaseUrl(): String = prefs.getString("vision_base_url", "").orEmpty()
+    fun saveVisionBaseUrl(url: String) {
+        var clean = url.trim()
+        if (clean.endsWith("/chat/completions")) clean = clean.removeSuffix("/chat/completions").trim()
+        if (clean.endsWith("/chat")) clean = clean.removeSuffix("/chat").trim()
+        clean = clean.trimEnd('/')
+        prefs.edit().putString("vision_base_url", clean).apply()
+    }
+    fun getVisionApiKeyOverride(): String = decrypt(prefs.getString("vision_api_key", "").orEmpty())
+    fun saveVisionApiKeyOverride(key: String) {
+        val clean = key.trim().filter { !it.isWhitespace() }
+        prefs.edit().putString("vision_api_key", encrypt(clean)).apply()
+    }
+
+    fun resolvedVisionBaseUrl(): String = getVisionBaseUrl().ifBlank { getBaseUrl() }
+    fun resolvedVisionApiKey(): String {
+        val ownKey = getVisionApiKeyOverride()
+        if (ownKey.isNotBlank()) return ownKey
+        // Never send the planning provider's credentials to a different endpoint.
+        return if (resolvedVisionBaseUrl().trimEnd('/') == getBaseUrl().trimEnd('/')) getApiKey() else ""
+    }
+
+// ==========================================
+    // 多服务商 (Provider) 密钥独立隔离存储
+    // ==========================================
+
+    fun getProviderId(baseUrl: String): String {
+        val clean = baseUrl.lowercase()
+        return when {
+            clean.contains("deepseek.com") -> "deepseek"
+            clean.contains("aliyuncs.com") || clean.contains("dashscope") -> "dashscope"
+            clean.contains("openai.com") -> "openai"
+            clean.contains("bigmodel.cn") || clean.contains("zhipu") -> "zhipu"
+            clean.contains("anthropic.com") -> "anthropic"
+            clean.contains("moonshot.cn") || clean.contains("kimi") -> "moonshot"
+            clean.contains("baichuan-ai.com") -> "baichuan"
+            clean.isNotBlank() -> {
+                try {
+                    val host = java.net.URI(if (clean.startsWith("http")) clean else "https://$clean").host.orEmpty()
+                    if (host.isNotBlank()) host.replace('.', '_') else "custom"
+                } catch (_: Exception) { "custom" }
+            }
+            else -> "default"
+        }
+    }
+
+    fun saveApiKeyForProvider(providerId: String, apiKey: String) {
+        val clean = apiKey.trim().filter { !it.isWhitespace() }
+        prefs.edit().putString("enc_api_key_$providerId", encrypt(clean)).apply()
+    }
+
+    fun getApiKeyForProvider(providerId: String): String {
+        val enc = prefs.getString("enc_api_key_$providerId", null) ?: return ""
+        return decrypt(enc)
+    }
+
     fun saveApiKey(apiKey: String) {
-        val encrypted = encrypt(apiKey)
-        prefs.edit().putString(KEY_ENCRYPTED_API_KEY, encrypted).apply()
+        val clean = apiKey.trim().filter { !it.isWhitespace() }
+        val provider = getProviderId(getBaseUrl())
+        saveApiKeyForProvider(provider, clean)
+        prefs.edit().putString(KEY_ENCRYPTED_API_KEY, encrypt(clean)).apply()
     }
 
     fun getApiKey(): String {
+        val provider = getProviderId(getBaseUrl())
+        val providerKey = getApiKeyForProvider(provider)
+        if (providerKey.isNotBlank()) return providerKey
         val encrypted = prefs.getString(KEY_ENCRYPTED_API_KEY, null) ?: return ""
         return decrypt(encrypted)
     }
@@ -112,7 +187,11 @@ class KeyStoreVault(private val context: Context) {
     fun hasApiKey(): Boolean = getApiKey().isNotEmpty()
 
     fun saveBaseUrl(url: String) {
-        prefs.edit().putString(KEY_BASE_URL, url.trim().removeSuffix("/")).apply()
+        var clean = url.trim()
+        if (clean.endsWith("/chat/completions")) clean = clean.removeSuffix("/chat/completions").trim()
+        if (clean.endsWith("/chat")) clean = clean.removeSuffix("/chat").trim()
+        clean = clean.trimEnd('/')
+        prefs.edit().putString(KEY_BASE_URL, clean).apply()
     }
 
     fun getBaseUrl(): String {

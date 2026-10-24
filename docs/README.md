@@ -48,4 +48,4 @@ flowchart TD
 - **开发语言**：Kotlin 2.2+ / Jetpack Compose / Coroutines & Flow
 - **架构基础**：Material 3 + Jetpack Compose + 协程 + 原生 `SQLiteOpenHelper`（未引入 Room/WorkManager，详见 `docs/ARCHITECTURE.md` §6 实现现状校准）
 
-> 2026-10-18：当前屏幕执行为无障碍控件树驱动，尚无截图视觉理解。新的 AgentLoop / ScreenSession / AgentConversation 及真实验证结论见 ARCHITECTURE.md §7 与 HANDOFF.md，旧历史记录不代表当前通用能力已通过验收。
+> 2026-10-18：基线 938ae49 已提交；随后接入可选截图视觉、加密会话落盘和用户确认后的任务恢复。新功能按用户要求尚未编译、测试或部署，当前真机与 APK 仍是基线版本。实现边界见 ARCHITECTURE.md §8、HANDOFF.md 与 TESTING.md。

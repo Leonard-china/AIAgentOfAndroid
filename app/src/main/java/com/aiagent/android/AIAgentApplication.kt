@@ -44,7 +44,7 @@ class AIAgentApplication : Application() {
         similarPhotoEngine = SimilarPhotoEngine(this)
         trashExecutor = TrashOperationExecutor(this, dbHelper)
         orchestrator = AgentOrchestrator(this, storageEngine, mediaScanner, duplicateEngine, similarPhotoEngine, vault)
-        conversation = com.aiagent.android.ai.AgentConversation(orchestrator)
+        conversation = com.aiagent.android.ai.AgentConversation(this, orchestrator, com.aiagent.android.data.ConversationStore(this, vault))
     }
 
     companion object {

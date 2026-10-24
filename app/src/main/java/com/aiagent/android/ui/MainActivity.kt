@@ -123,9 +123,17 @@ class MainActivity : ComponentActivity() {
                             messages = messages,
                             activeSteps = activeSteps,
                             isProcessing = isProcessing,
+                            isLoading = conversation.isLoading,
+                            storageError = conversation.storageError,
+                            sessions = conversation.sessions,
+                            currentSessionId = conversation.currentSessionId,
+                            checkpoint = conversation.checkpoint,
+                            onSelectSession = { conversation.selectSession(it) },
+                            onResumeTask = { conversation.resumeTask(it) },
+                            onRetryStorage = { conversation.retryStorage() },
                             onSendMessage = { prompt -> handleUserPrompt(prompt) },
                             onNewChat = { startNewChat() },
-                            onStopTask = { AIAgentApplication.instance.orchestrator.cancelCurrentTask() },
+                            onStopTask = { conversation.stop() },
                             onOpenSettings = { currentTab = AppTab.SETTINGS },
                             screenConnected = com.aiagent.android.screen.ScreenAssistantAccessibilityService.connectionState.collectAsState().value && AIAgentApplication.instance.vault.isScreenAssistantEnabled(),
                             modelLabel = AIAgentApplication.instance.vault.let {
@@ -169,7 +177,7 @@ class MainActivity : ComponentActivity() {
                                     status = PlanStatus.PREVIEW
                                 )
                                 currentTab = AppTab.ASSISTANT
-                                messages.add(
+                                conversation.recordMessage(
                                     AiMessage(
                                         sender = "ASSISTANT",
                                         content = "已为您生成批量操作卡片，请确认后移入系统回收站：",
@@ -217,12 +225,13 @@ class MainActivity : ComponentActivity() {
                 val res = app.trashExecutor.onConsentResultReceived(plan, result.resultCode)
                 when (res) {
                     is TrashOperationExecutor.TrashResult.Completed -> {
+                        conversation.resolvePlan(res.plan)
                         val content = if (res.plan.status == PlanStatus.PARTIAL_SUCCESS) {
                             "⚠️ 回收站操作已提交，但复核发现部分目标仍留在原位置（可能被其他应用占用或移动）。请在【操作记录】中查看审计详情，并重新扫描确认。"
                         } else {
                             "✅ 操作成功！已将 ${res.plan.targets.size} 个文件移入系统回收站，预计可释放空间 ${formatBytes(res.releasedBytes)}。"
                         }
-                        messages.add(
+                        conversation.recordMessage(
                             AiMessage(
                                 sender = "ASSISTANT",
                                 content = content
@@ -233,7 +242,7 @@ class MainActivity : ComponentActivity() {
                         loadAuditData()
                     }
                     is TrashOperationExecutor.TrashResult.Failed -> {
-                        messages.add(
+                        conversation.recordMessage(
                             AiMessage(
                                 sender = "ASSISTANT",
                                 content = "⚠️ 操作已终止: ${res.errorMessage}"
@@ -372,7 +381,7 @@ class MainActivity : ComponentActivity() {
     private fun startNewChat() { conversation.newChat() }
 
     private fun handleUserPrompt(prompt: String) {
-        if (isProcessing || prompt.isBlank()) return
+        if (isProcessing || conversation.isLoading || conversation.storageError != null || prompt.isBlank()) return
         val trimmed = prompt.trim().removePrefix("➕").trim()
         if (trimmed == "开新对话" || trimmed == "新建对话" || trimmed == "清空对话" || trimmed == "重新开始") {
             startNewChat()
@@ -383,8 +392,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun executeActionPlan(plan: ActionPlan) {
+        if (isProcessing || conversation.isLoading || plan.status != PlanStatus.PREVIEW) return
         lifecycleScope.launch {
             plan.status = PlanStatus.EXECUTING
+            conversation.recordStateChange()
             val app = AIAgentApplication.instance
             val result = app.trashExecutor.prepareTrashRequest(plan)
 
@@ -395,7 +406,8 @@ class MainActivity : ComponentActivity() {
                 }
                 is TrashOperationExecutor.TrashResult.Completed -> {
                     plan.status = PlanStatus.SUCCESS
-                    messages.add(
+                    conversation.resolvePlan(plan)
+                    conversation.recordMessage(
                         AiMessage(
                             sender = "ASSISTANT",
                             content = "✅ 操作成功！已将 ${plan.targets.size} 个文件移入回收站，预计释放 ${formatBytes(result.releasedBytes)}。"
@@ -411,7 +423,7 @@ class MainActivity : ComponentActivity() {
                     result.plan.status = PlanStatus.PREVIEW
                     val planMessageIndex = messages.indexOfFirst { it.plan === plan }
                     if (planMessageIndex >= 0) {
-                        messages[planMessageIndex] = messages[planMessageIndex].copy(plan = result.plan)
+                        conversation.replaceMessageAt(planMessageIndex, messages[planMessageIndex].copy(plan = result.plan))
                     }
                     val remainingCount = result.plan.targets.size
                     Toast.makeText(
@@ -422,7 +434,8 @@ class MainActivity : ComponentActivity() {
                 }
                 is TrashOperationExecutor.TrashResult.Failed -> {
                     plan.status = PlanStatus.FAILED
-                    messages.add(
+                    conversation.resolvePlan(plan)
+                    conversation.recordMessage(
                         AiMessage(
                             sender = "ASSISTANT",
                             content = "❌ 操作失败: ${result.errorMessage}"
@@ -435,6 +448,7 @@ class MainActivity : ComponentActivity() {
 
     private fun cancelActionPlan(plan: ActionPlan) {
         plan.status = PlanStatus.CANCELLED
+                    conversation.resolvePlan(plan)
         lifecycleScope.launch {
             AIAgentApplication.instance.dbHelper.insertAuditRecord(
                 AuditRecord(
@@ -448,7 +462,7 @@ class MainActivity : ComponentActivity() {
             )
             loadAuditData()
         }
-        messages.add(
+        conversation.recordMessage(
             AiMessage(
                 sender = "ASSISTANT",
                 content = "已取消该操作，未做任何修改。"

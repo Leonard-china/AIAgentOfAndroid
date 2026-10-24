@@ -119,11 +119,11 @@ object ToolRegistry {
         // Targets must come from the latest local screen snapshot.
         tools.add(createToolFunction(
             name = "operate_screen_click",
-            description = "点击最新 screen 中的真实控件。提供 snapshot_id 和 node_id；可用唯一的完整 text 作为备选。禁止猜测控件。",
+            description = "点击最新 screen 中的真实控件。优先 snapshot_id + node_id；视觉定位后可用 snapshot_id + visual_id + visual_target_id，执行前会重新截屏比对；禁止任意坐标。",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
                 add("properties", JsonObject().apply {
-                    listOf("snapshot_id", "node_id", "text").forEach { key ->
+                    listOf("snapshot_id", "node_id", "text", "visual_id", "visual_target_id").forEach { key ->
                         add(key, JsonObject().apply { addProperty("type", "string") })
                     }
                 })
@@ -313,8 +313,59 @@ object ToolRegistry {
         ))
 
         tools.add(createToolFunction(
+            name = "inspect_screen_visual",
+            description = "仅在用户已开启截图视觉并配置视觉模型后，按需观察当前应用截图；用于无障碍控件不可读时理解画面或定位。截图只在内存中发送给用户配置的视觉接口，不保存。受保护/密码界面拒绝截图。",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject().apply {
+                    add("focus", JsonObject().apply { addProperty("type", "string"); addProperty("description", "本次需要理解或定位的内容，不超过500字") })
+                })
+                add("required", JsonArray().apply { add("focus") })
+            }
+        ))
+
+        tools.add(createToolFunction(
+            name = "execute_action_pipeline",
+            description = "预判并快速连贯执行一组确定性高的屏幕动作序列（如打开应用并搜索：launch_app -> wait_and_click -> wait_and_input）。端侧在本地毫秒级监听目标控件出现后立即连击，无需中间多轮网络往返。若目标未出现或遇到非预期弹窗，会安全熔断并返回当前实际界面供重新决策。严禁包含删除、付款等破坏性操作。",
+            parameters = JsonObject().apply {
+                addProperty("type", "object")
+                add("properties", JsonObject().apply {
+                    val stepsProp = JsonObject().apply {
+                        addProperty("type", "array")
+                        addProperty("description", "预判动作列表（最多4步）")
+                        val itemSchema = JsonObject().apply {
+                            addProperty("type", "object")
+                            add("properties", JsonObject().apply {
+                                add("action", JsonObject().apply {
+                                    addProperty("type", "string")
+                                    add("enum", JsonArray().apply {
+                                        add("launch_app"); add("wait_and_click"); add("wait_and_input"); add("swipe")
+                                    })
+                                    addProperty("description", "动作类型")
+                                })
+                                add("app_name", JsonObject().apply { addProperty("type", "string"); addProperty("description", "launch_app 时的应用名，如 '哔哩哔哩'") })
+                                add("target_text", JsonObject().apply { addProperty("type", "string"); addProperty("description", "wait_and_click 或 wait_and_input 需匹配的文字/描述，如 '搜索'") })
+                                add("text", JsonObject().apply { addProperty("type", "string"); addProperty("description", "wait_and_input 填入的文本") })
+                                add("submit", JsonObject().apply { addProperty("type", "boolean"); addProperty("description", "输入后是否回车提交，默认 false") })
+                                add("direction", JsonObject().apply {
+                                    addProperty("type", "string")
+                                    add("enum", JsonArray().apply { add("UP"); add("DOWN"); add("LEFT"); add("RIGHT") })
+                                })
+                                add("timeout_ms", JsonObject().apply { addProperty("type", "integer"); addProperty("description", "等待超时毫秒数，默认 3500ms") })
+                            })
+                            add("required", JsonArray().apply { add("action") })
+                        }
+                        add("items", itemSchema)
+                    }
+                    add("steps", stepsProp)
+                })
+                add("required", JsonArray().apply { add("steps") })
+            }
+        ))
+
+        tools.add(createToolFunction(
             name = "finish_task",
-            description = "屏幕任务的结束报告。completed 必须引用最新 snapshot_id 和实际节点原文 evidence；受阻或需用户接手用 blocked/needs_user，summary 说明具体原因。",
+            description = "屏幕任务的结束报告。只读理解且未改变屏幕时可用 answered 引用观察证据；completed 必须引用最新 snapshot_id 和节点/视觉识别原文 evidence；受阻或需用户接手用 blocked/needs_user，summary 说明具体原因。",
             parameters = JsonObject().apply {
                 addProperty("type", "object")
                 add("properties", JsonObject().apply {
@@ -322,7 +373,7 @@ object ToolRegistry {
                         add(key, JsonObject().apply {
                             addProperty("type", "string")
                             if (key == "status") add("enum", JsonArray().apply {
-                                add("completed"); add("blocked"); add("needs_user")
+                                add("completed"); add("answered"); add("blocked"); add("needs_user")
                             })
                         })
                     }

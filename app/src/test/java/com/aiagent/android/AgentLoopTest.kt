@@ -91,4 +91,62 @@ class AgentLoopTest {
         assertEquals("INCOMPLETE", result.status)
         assertEquals(2, executed)
     }
+
+    @Test fun `recovery requires evidence from the newly observed screen`() = runTest {
+        val replies = ArrayDeque(listOf(response(call("finish_task", finish)),
+            response(call("finish_task", finish.replace("s1", "fresh")))))
+        val result = AgentLoop().run(JsonArray(), { replies.removeFirst() },
+            { error("Recovery must not replay an old action") }, { _, _ -> }, initialScreen = screen("fresh"))
+        assertEquals("COMPLETED", result.status)
+        assertTrue(replies.isEmpty())
+    }
+
+    @Test fun `changing visual frame can answer but cannot prove completion`() = runTest {
+        val observation = screen().apply {
+            add("nodes", JsonArray())
+            add("visual", JsonObject().apply {
+                addProperty("fresh", false)
+                add("evidence", JsonArray().apply { add("搜索结果") })
+            })
+        }
+        val replies = ArrayDeque(listOf(response(call("inspect_screen_visual")),
+            response(call("finish_task", finish)),
+            response(call("finish_task", finish.replace("completed", "answered")))))
+        val result = AgentLoop().run(JsonArray(), { replies.removeFirst() },
+            { AgentLoop.Outcome("ok", "单帧观察", observation) }, { _, _ -> })
+        assertEquals("ANSWERED", result.status)
+        assertTrue(result.summary.contains("截图单帧识别"))
+        assertTrue(replies.isEmpty())
+    }
+
+    @Test fun `answered cannot conceal an unverified screen mutation`() = runTest {
+        val replies = ArrayDeque(listOf(response(call("operate_screen_click")),
+            response(call("finish_task", finish.replace("completed", "answered")))))
+        val result = AgentLoop(maxTurns = 2).run(JsonArray(), { replies.removeFirst() },
+            { AgentLoop.Outcome("ok", "已点击", screen()) }, { _, _ -> })
+        assertEquals("INCOMPLETE", result.status)
+    }
+
+    @Test fun `execute_action_pipeline mutates screen and enables completed with valid evidence`() = runTest {
+        val pipelineResultScreen = screen("fresh").apply {
+            getAsJsonArray("nodes").add(JsonObject().apply {
+                addProperty("id", "n1")
+                addProperty("text", "搜索结果")
+                addProperty("description", "")
+            })
+        }
+        val replies = ArrayDeque(listOf(
+            response(call("execute_action_pipeline", """{"steps":[{"action":"launch_app","app_name":"哔哩哔哩"},{"action":"wait_and_click","target_text":"搜索"}]}""")),
+            response(call("finish_task", finish.replace("s1", "fresh").replace("设置", "搜索结果")))
+        ))
+        val result = AgentLoop().run(
+            messages = JsonArray(),
+            request = { replies.removeFirst() },
+            execute = { AgentLoop.Outcome("ok", "流水线已完成", pipelineResultScreen) },
+            onAction = { _, _ -> }
+        )
+        assertEquals("COMPLETED", result.status)
+        assertTrue(result.summary.contains("搜索结果"))
+        assertTrue(replies.isEmpty())
+    }
 }

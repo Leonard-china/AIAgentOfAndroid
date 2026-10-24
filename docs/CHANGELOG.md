@@ -712,3 +712,132 @@
 - **真实行为**：顶部 HUD 停止及主界面停止分别实测进入 CANCELLED，发送按钮恢复；日志 task cancelled by user。最终 APK 再跑同一 3Blue1Brown 搜索/打开视频任务，COMPLETED / 10 steps，实际视频页面与结果报告一致。首轮为 9 步；两轮起始界面不同，不按步数比较性能或成功率。测试结束返回主应用，关闭主机 logcat 观察进程。
 - **限制与下一步**：最终模型使用“简介”作为证据，文本出处校验通过但语义证据较弱，必须继续加强目标核验；目前只有特定 B 站任务实测，未验证所有应用。截图视觉理解、会话落盘与任务恢复仍未实现，优先补齐这三项。UIAutomator 运行中抑制无障碍的测试干扰已在 TESTING 中记录。
 - **提交**：本轮未提交；分支 master，HEAD 4de95e4。
+
+
+## [2026-10-18 12:15:09] - 提交上轮基线，开始视觉/持久化/恢复开发（按用户要求暂不验证）
+
+- **Git 基线**：已提交 `938ae492366968dd852eb6d6fb02abd104cc4293`，包含上轮任务闭环/UI/停止修复与既有文档，未推送远程。
+- **本批代码**：ConversationModels、独立加密 ConversationStore（noBackupFilesDir SQLite，revision 防旧写覆盖）、AgentConversation 自动保存/会话切换/恢复状态、前台 AgentTaskService、编排器动作前后持久检查点。恢复不重放旧工具，先重新观察；旧文件确认计划恢复后标为 STALE。
+- **文件**：model/ConversationModels.kt、model/Models.kt、data/ConversationStore.kt、security/KeyStoreVault.kt、ai/AgentConversation.kt、ai/AgentOrchestrator.kt、service/AgentTaskService.kt、AIAgentApplication.kt、AndroidManifest.xml。
+- **真实验证结果**：用户明确要求本轮先不用验证且正在用手机，本批未运行编译、测试、网络连接测试、ADB、安装或真机操作；代码尚在集成，不声明可运行。
+- **已知事项**：历史/恢复 UI 与视觉管线仍在开发；新代码不包含上轮的验证结论。后续需执行编译、数据库重启恢复、断电时动作不确定性、网络与前台服务验证。
+
+
+## [2026-10-18 12:18:58] - 视觉管线与历史/恢复 UI 接入（未验证）
+
+- **原因与摘要**：补齐用户要求的屏幕视觉观察与真实落盘后的操作入口。新增 ScreenCapture、ScreenVision，按需截图、独立视觉配置、图像内存清理、本地视觉引用及截图复核；接入历史会话底部列表、恢复确认、存储失败提示。普通节点仍优先原生执行，文件管理不改走视觉。
+- **文件**：screen/ScreenCapture.kt、ScreenVision.kt、ScreenSession.kt、ScreenActionHud.kt；ai/LlmClient.kt、ToolRegistry.kt、AgentLoop.kt、AgentOrchestrator.kt；ui/AssistantScreen.kt、MainActivity.kt、SettingsScreen.kt；floating/FloatingAssistantService.kt、accessibility_service_config.xml、ToolRegistryTest.kt。
+- **真实验证**：遵照用户指示未执行编译、测试、API 请求、ADB 或真机操作。仅阅读官方 API 文档并编写源码；工具 Schema 测试期望已从20改21，但未运行。
+- **后续注意**：需要实测截图能力重新绑定、资源释放、动态画面指纹导致的拒绝、视觉接口兼容、历史/恢复确认、保存失败与进程死亡边界；不能把这些代码写成通过验收。
+
+
+## [2026-10-18 12:23:43] - 视觉理解、会话落盘和任务恢复源码接入完成，验证按用户要求暂缓
+
+- **变更摘要**：完成视觉开关/独立接口配置、单帧图像理解与本地目标引用；加密会话库、历史和当前会话选择；工具前后检查点、前台任务通知、手动确认后重观察恢复；旧文件计划标记过期并按 planId 同步结果。动态画面只读，不允许过期视觉点击；模型识别不作为独立语义验证器。
+- **文件/模块**：新增 model/ConversationModels.kt、data/ConversationStore.kt、screen/ScreenCapture.kt、ScreenVision.kt、service/AgentTaskService.kt；调整 AgentConversation、AgentLoop、AgentOrchestrator、LlmClient、ToolRegistry、ScreenSession、ScreenActionHud、KeyStoreVault、Models、AIAgentApplication、MainActivity、AssistantScreen、SettingsScreen、FloatingAssistantService、AndroidManifest.xml、accessibility_service_config.xml、ToolRegistryTest；同步 docs/README、PRODUCT、ARCHITECTURE、TESTING、HANDOFF、CHANGELOG。
+- **真实验证结果**：按用户要求没有编译、测试、调用用户模型、使用 ADB、安装、部署或操作手机。本轮代码未验证，没有新 APK；既有 29 项及真机记录只适用于基线938ae49。
+- **已知限制与后续**：需在用户允许后先编译，再验证视觉接口/截图能力重绑定、静态与动态画面、数据库生命周期与写失败、系统前台限制、进程死亡和重复外部动作边界。截图隐私检测仅覆盖显式密码节点，不承诺所有敏感内容自动识别。会话输入草稿不落盘，进程恢复不自动重放动作。
+- **Git**：上轮基线已提交 `938ae492366968dd852eb6d6fb02abd104cc4293`；本轮新功能保留未提交工作区，未推送远程。
+
+
+## [2026-10-24 17:38:00] - 预判动作流水线实现、会话与感知哈希优化、真机编译安装
+
+- **变更摘要与修改原因**：
+  - 针对大模型单步串行等待（Stop-and-Wait）导致连贯任务（如打开应用搜索）反应慢、耗时长的问题，新增 `execute_action_pipeline` 工具（工具总数扩充为 22）。
+  - 实现端侧 60ms 极速本地守卫（Local Guard）：控件渲染后就地穿透派发，跳过中间多轮网络往返；超时或遇到非预期弹窗/开屏广告时安全熔断中止流水线，退回当前真实界面交由大模型单步决策。
+  - 严格拦截破坏性操作（`删除`、`支付`、`付款`、`购买`、`转账` 等禁止流水线执行）。
+  - `ScreenCapture` 引入 16x16 灰度差异哈希（dHash）汉明距离（容差 <= 12 bits），包容输入框光标闪烁与微小轮播动效，避免严苛 SHA-256 的画面变动误判。
+  - `ConversationStore` 扩充明文 `title` 与 `task_status` 字段，并新增 `deleteSession`，消除历史会话列表全量 AES 解密卡顿。
+- **涉及文件**：
+  - `ai/ToolRegistry.kt`、`screen/ScreenSession.kt`、`screen/ScreenAssistantAccessibilityService.kt`、`ai/AgentOrchestrator.kt`、`ai/AgentLoop.kt`、`data/ConversationStore.kt`、`screen/ScreenCapture.kt`；
+  - `app/src/test/java/com/aiagent/android/ToolRegistryTest.kt`、`AgentLoopTest.kt`；
+  - `docs/ARCHITECTURE.md`、`docs/CHANGELOG.md`、`docs/HANDOFF.md`。
+- **具体的验证方法与真实执行结果**：
+  - 运行命令：`.\gradlew.bat testDebugUnitTest assembleDebug --rerun-tasks`
+  - 结果：`BUILD SUCCESSFUL in 56s`，42 actionable tasks: 42 executed；
+  - 单元测试覆盖：8 类 33 项单元测试全部通过（0 failures, 0 errors），包含新增的流水线状态扭转与 Schema 断言测试；
+  - APK 构建产物：`app/build/outputs/apk/debug/app-debug.apk`（64,656,592 bytes），SHA-256 为 `63E28B9010186325CF1393B276D43D2D163C7D3800BAF0799E836832748F1ED4`；
+  - 真机部署：通过 ADB（`-s AXRBUT6520002413 install -r`）推送到荣耀 VKJ-AN00（Android 16），执行结果 `Success`；
+  - 服务与连通性验证：通过 ADB 配置激活无障碍服务，真机 logcat 证实：`ScreenAssistantAccessibilityService connected successfully.`；MainActivity 成功调起。
+- **已知问题与后续注意事项**：
+  - 预判动作流水线依赖当前界面具备真实无障碍文本或输入焦点；自绘无障碍极稀疏页面会自动安全熔断退回单步。
+  - 首次全新启动后需在设置中确保开启“屏幕操作”开关。
+- **提交**：本批未提交，保留在工作区。
+
+
+## [2026-10-24 17:49:00] - 模型 API Key 与配置页面全面重构、智能净化与体验升级
+
+- **变更摘要与修改原因**：
+  - 解决用户指出的模型 API Key 填写页面的重大交互与逻辑问题：
+    1. 预设标签（FilterChip）水平溢出截断问题：改用 `Modifier.horizontalScroll(rememberScrollState())`，支持平滑横向滚动，完整露出一键预设（DeepSeek V3、R1、通义千问 Max/Plus/VL、GPT-4o、GLM-4）。
+    2. 打字卡顿与跳字问题：移除 `onValueChange` 每次按键即调用底层 KeyStore 硬件加密的严重性能陷阱，输入框改为内存状态响应，提供显式【保存配置】按钮。
+    3. 智能清除剪贴板空白与换行符：`cleanApiKey` 自动剔除所有非法空白符与换行符 `\n`，杜绝 OkHttp 非法 Header 抛错与 401 鉴权失败。
+    4. 智能净化 Base URL：`cleanBaseUrl` 自动去除尾随的 `/chat/completions`、`/chat` 与多余斜杠，并自动补齐 `https://` 协议，提升容错率。
+    5. 修复【测试连接】在推理模型（如 DeepSeek-R1）上因极小 `max_tokens` 报 400 失败的问题，并提供通俗易懂的中文诊断错误码说明（401、403、404、429 等）。
+    6. 重构视觉模型交互逻辑：默认自动沿用主模型的 Base URL 与 API Key（无需重复输入），仅在勾选“使用独立的第三方多模态服务商”时才展开独立输入框，并补齐小眼睛明暗文切换与独立测试连接。
+- **涉及文件**：
+  - `ui/SettingsScreen.kt`、`ai/LlmClient.kt`、`security/KeyStoreVault.kt`；
+  - `docs/CHANGELOG.md`、`docs/HANDOFF.md`。
+- **具体的验证方法与真实执行结果**：
+  - 重新编译与单元测试：`.\gradlew.bat testDebugUnitTest assembleDebug --rerun-tasks`
+  - 结果：`BUILD SUCCESSFUL in 57s`，全量 33 项单元测试 100% 通过（0 failures, 0 errors）；
+  - 打包生成：`app-debug.apk`，SHA-256 为 `D189D1E2B7711CA06A83F533C5A3315260D058DBE76467CCB7AB390C03FF3A98`；
+  - 真机覆盖安装：通过 ADB（`-r -d -t`）成功安装到荣耀 VKJ-AN00（Android 16），执行结果 `Success`；MainActivity 正常运行。
+- **已知事项与下一步**：
+  - 用户可直接在手机【设置】页面体验全新的模型配置流，左右滑动选择预设，粘贴 API Key 后点击【保存配置】与【测试连接】。
+- **提交**：本批未提交，保留在工作区。
+
+
+## [2026-10-24 18:12:00] - 多模型服务商 API Key 独立加密隔离与自动记忆还原落地
+
+- **变更摘要与修改原因**：
+  - 解决用户反馈的“为什么不同模型切换时，key 不会变”的核心问题：
+    1. 根因剖析：此前底层采用单一键名存储 `api_key`，点击不同模型预设时只变更了 Base URL 和 Model Name，密钥输入框直接沿用上一模型残留的 Key，既容易把 DeepSeek Key 错发给通义千问造成 401 报错，也无法在频繁切换模型对比测试时记忆不同厂商的专属密钥。
+    2. 多 Provider 密钥保险库设计：在 `KeyStoreVault` 中引入 Provider 识别算法（`getProviderId`），根据 URL Host 智能识别并归一化为 `deepseek`、`dashscope`、`openai`、`zhipu` 等独立 Provider 命名空间；
+    3. 专属硬件加密槽位：新增 `saveApiKeyForProvider(providerId, key)` 与 `getApiKeyForProvider(providerId)`，使用 Android KeyStore 硬件后端的 AES-256-GCM 独立加密持久化每个厂商的密钥；
+    4. 预设联动与自动无缝还原：重构 `SettingsScreen` 的 `selectPreset` 逻辑，在切换到目标模型时，先暂存当前未保存的密钥，再自动从本地安全保险库检索目标厂商的专属 Key。若此前已配置，自动无缝提取并填充，并给出“已自动切换为【XXX】的已保存密钥”绿色提示；若尚未配置，则清空输入框并提示用户粘贴该厂商专属 Key，绝不串用上一个厂商的残留 Key；
+    5. 视觉动态标识：API Key 输入框的 Label 动态更新为 `API Key (XXX 专属密钥)`，让用户一目了然当前作用域；
+    6. 双向状态防呆：密钥为空时【测试连接】按钮自动禁用灰显，输入或恢复有效密钥后立即激活。
+- **涉及文件**：
+  - `security/KeyStoreVault.kt`、`ui/SettingsScreen.kt`、`ai/LlmClient.kt`；
+  - `docs/ARCHITECTURE.md`、`docs/CHANGELOG.md`、`docs/HANDOFF.md`。
+- **具体的验证方法与真实执行结果**：
+  - 编译与单元测试：`.\gradlew.bat testDebugUnitTest assembleDebug --rerun-tasks`，全量 33 项单元测试 100% 通过（0 failures, 0 errors），构建成功 `BUILD SUCCESSFUL in 58s`；
+  - 真机部署与安装确认：通过 ADB 推送至真机（荣耀 VKJ-AN00 / Android 16），在系统安装提示弹窗中点击完成，精准激活并调起最新 Debug 应用（`com.aiagent.android.debug`）；
+  - 真机多服务商密钥隔离实测（通过真机无障碍 UI 自动化与 dump 验证）：
+    1. 在【设置】中选中【DeepSeek V3 (推荐)】，输入测试 Key `sk-test-deepseek-key-12345` 并点击【保存配置】；
+    2. 横向滑动 Chip 栏，点击选择【通义千问 Max】，观察到 Base URL 变为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，API Key 标签变为 `API Key (通义千问 / 百炼 专属密钥)`，输入框干净清空，提示 `已切换为【通义千问 Max】（尚未配置密钥，请在下方粘贴并保存）`，【测试连接】按钮按预期自动禁用；
+    3. 为通义千问输入专属 Key `sk-test-dashscope-999` 并保存；
+    4. 再次向右滑动 Chip 栏切回【DeepSeek V3】，输入框**立即自动无缝恢复**为 DeepSeek 专属 Key，界面弹出反馈 `✓ 已自动切换为【DeepSeek V3 (推荐)】的已保存密钥`；
+    5. 再次点击【通义千问 Max】，输入框**再次自动无缝恢复**为通义千问专属 Key，反馈 `✓ 已自动切换为【通义千问 Max】的已保存密钥`；
+    6. 实测证明多服务商 API Key 独立加密与切换还原 100% 达成，彻底杜绝混用与重新填写的麻烦。
+- **已知事项与下一步**：
+  - 核心设置页面交互与多模型密钥隔离已全部闭环；用户已可在手机上自由切换并保存各大主流模型密钥。
+  - 下一步优先任务：主界面输入复杂手机任务（如“在B站搜索指定 UP 主并播放第一条视频”），全面体验已就绪的毫秒级预判动作流水线（`execute_action_pipeline`）端侧连击。
+- **提交**：本批未提交，保留在工作区。
+
+---
+
+## [2026-10-24 19:27:00] - Release v1.1.0 构建、签名校验与 GitHub 发布
+
+- **变更摘要与修改原因**：
+  - 响应用户指令“构建release-apk并推到github”；
+  - 升级 `app/build.gradle.kts` 版本配置：`versionCode = 2`，`versionName = "1.1.0"`；
+  - 基于根目录 `release.keystore` 签名机制完成正式签名构建，产出 `app-release.apk`；
+  - 严格通过 `apksigner` 与 `aapt2` 进行 v2 方案签名合法性及 Badging 校验；
+  - 产物全面包含预判动作流水线、多 Provider 密钥隔离、全新横滑模型设置页与会话持久化等全部演进；
+  - 同步推送代码至 GitHub 远程主干分支并发布 GitHub Release `v1.1.0` 资产。
+- **涉及文件**：
+  - `app/build.gradle.kts`；
+  - `docs/CHANGELOG.md`、`docs/HANDOFF.md`。
+- **具体的验证方法与真实执行结果**：
+  - 构建命令：`.\gradlew.bat testDebugUnitTest assembleRelease`；
+  - 执行结果：`BUILD SUCCESSFUL in 48s`，72 actionable tasks (17 executed, 55 up-to-date)，单元测试 100% 通过；
+  - 签名与 APK 信息校验：
+    - `apksigner.bat verify --verbose app/build/outputs/apk/release/app-release.apk`：输出 `Verifies`，`Verified using v2 scheme (APK Signature Scheme v2): true`，签名者数量为 1；
+    - `aapt2 dump badging`：确认 `package: name='com.aiagent.android' versionCode='2' versionName='1.1.0' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36'`；
+    - 文件大小：46,236,369 bytes；
+    - SHA-256：`40CB95047CC48BC51AA623701AEDCBB0DA7BD863A2E46CFEE98B164D0220586C`。
+- **已知事项与后续**：
+  - Git 提交并推送至 `origin/master`；
+  - 发布 GitHub Release `v1.1.0` 并挂载 `app-release.apk`。

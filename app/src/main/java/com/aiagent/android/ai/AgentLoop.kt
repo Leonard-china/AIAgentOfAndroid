@@ -20,12 +20,14 @@ class AgentLoop(private val maxTurns: Int = 24, private val maxActions: Int = 48
         messages: JsonArray,
         request: suspend (JsonArray) -> LlmClient.LlmResponse,
         execute: suspend (LlmClient.ToolCall) -> Outcome,
-        onAction: suspend (String, Outcome?) -> Unit
+        onAction: suspend (String, Outcome?) -> Unit,
+        initialScreen: JsonObject? = null
     ): Result {
         var actions = 0
-        var latestScreen: JsonObject? = null
-        var lastOutcome: Outcome? = null
-        var screenTask = false
+        var latestScreen: JsonObject? = initialScreen
+        var lastOutcome: Outcome? = initialScreen?.let { Outcome("ok", "恢复时重新观察的界面", it) }
+        var screenTask = initialScreen != null
+        var hasMutatedScreen = false
         var repeatedCall: String? = null
         var repeatedScreen: String? = null
         var repeats = 0
@@ -69,23 +71,33 @@ class AgentLoop(private val maxTurns: Int = 24, private val maxActions: Int = 48
                     val snapshotId = args?.get("snapshot_id")?.asString
                     val evidence = args?.get("evidence")?.asString.orEmpty()
                     val screenId = latestScreen?.get("snapshot_id")?.asString
-                    val validEvidence = evidence.length >= 2 && latestScreen?.getAsJsonArray("nodes")?.any {
+                    val nativeEvidence = evidence.length >= 2 && latestScreen?.getAsJsonArray("nodes")?.any {
                         val node = it.asJsonObject
                         listOf("text", "description").any { key ->
                             node.get(key)?.asString?.contains(evidence, ignoreCase = true) == true
                         }
                     } == true
+                    val vision = latestScreen?.getAsJsonObject("visual")
+                    val visualEvidence = evidence.length >= 2 && vision?.getAsJsonArray("evidence")?.any {
+                        it.asString.contains(evidence, ignoreCase = true)
+                    } == true
+                    val freshVisualEvidence = visualEvidence && vision?.get("fresh")?.asBoolean == true
+                    val validEvidence = nativeEvidence || freshVisualEvidence
+                    if (status == "answered" && summary.isNotBlank() && snapshotId != null && snapshotId == screenId && lastOutcome?.status == "ok" && !hasMutatedScreen && (nativeEvidence || visualEvidence)) {
+                        return Result("ANSWERED", "$summary\n\n${if (nativeEvidence) "界面依据" else "截图单帧识别（可能有误，不代表当前画面）"}：$evidence")
+                    }
                     if (summary.isNotBlank() && status in listOf("blocked", "needs_user")) {
                         return Result(if (status == "blocked") "BLOCKED" else "NEEDS_USER", summary)
                     }
                     if (status == "completed" && summary.isNotBlank() && screenTask &&
                         snapshotId != null && snapshotId == screenId && validEvidence && lastOutcome?.status == "ok") {
-                        return Result("COMPLETED", "$summary\n\n界面依据：$evidence")
+                        return Result("COMPLETED", "$summary\n\n${if (nativeEvidence) "界面依据" else "视觉模型识别依据（可能有误）"}：$evidence")
                     }
                     appendTool(messages, call.id, Outcome("error", "完成核验未通过：必须引用最新 snapshot_id 和实际节点中的原文 evidence，且最近操作须成功。请重新观察或报告阻塞。"))
                     continue
                 }
                 screenTask = screenTask || call.functionName in screenTools
+                if (call.functionName in screenTools && call.functionName !in setOf("inspect_current_screen", "inspect_screen_visual")) hasMutatedScreen = true
                 onAction(call.functionName, null)
                 val outcome = execute(call)
                 lastOutcome = outcome
@@ -115,8 +127,8 @@ class AgentLoop(private val maxTurns: Int = 24, private val maxActions: Int = 48
     }
 
     companion object {
-        val screenTools = setOf("launch_app", "inspect_current_screen", "operate_screen_click",
+        val screenTools = setOf("launch_app", "inspect_current_screen", "inspect_screen_visual", "operate_screen_click",
             "operate_screen_input", "operate_screen_swipe", "operate_screen_global_action",
-            "open_accessibility_settings", "open_storage_settings")
+            "open_accessibility_settings", "open_storage_settings", "execute_action_pipeline")
     }
 }

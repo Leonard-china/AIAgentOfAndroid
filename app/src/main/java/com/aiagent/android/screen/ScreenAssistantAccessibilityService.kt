@@ -549,7 +549,7 @@ class ScreenAssistantAccessibilityService : AccessibilityService() {
         Log.w(TAG, "ScreenAssistantAccessibilityService destroyed.")
     }
 
-    private fun clickNodeOrParent(node: AccessibilityNodeInfo?): Boolean {
+    internal fun clickNodeOrParent(node: AccessibilityNodeInfo?): Boolean {
         var current = node
         while (current != null) {
             if (current.isClickable) {

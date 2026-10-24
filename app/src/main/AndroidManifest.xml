@@ -99,6 +99,13 @@
                 android:value="floating_assistant_overlay" />
         </service>
 
+        <service
+            android:name=".service.AgentTaskService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="user_requested_phone_agent_task" />
+        </service>
     </application>
 
 </manifest>

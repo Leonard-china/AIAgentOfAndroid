@@ -22,17 +22,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aiagent.android.model.ConversationSummary
+import com.aiagent.android.model.TaskCheckpoint
 import com.aiagent.android.model.ActionPlan
 import com.aiagent.android.model.AiMessage
 import com.aiagent.android.model.PlanStatus
 import com.aiagent.android.model.TaskStep
 import com.aiagent.android.model.formatBytes
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AssistantScreen(
     messages: List<AiMessage>,
     activeSteps: List<TaskStep>,
     isProcessing: Boolean,
+    isLoading: Boolean,
+    storageError: String?,
+    sessions: List<ConversationSummary>,
+    currentSessionId: String,
+    checkpoint: TaskCheckpoint?,
+    onSelectSession: (String) -> Unit,
+    onResumeTask: (String) -> Unit,
+    onRetryStorage: () -> Unit,
     onSendMessage: (String) -> Unit,
     onConfirmPlan: (ActionPlan) -> Unit,
     onCancelPlan: (ActionPlan) -> Unit,
@@ -43,7 +54,40 @@ fun AssistantScreen(
     modelLabel: String,
     modifier: Modifier = Modifier
 ) {
-    var inputText by remember { mutableStateOf("") }
+    var inputText by remember(currentSessionId) { mutableStateOf("") }
+    var showHistory by remember { mutableStateOf(false) }
+    var resumeConfirmation by remember { mutableStateOf<TaskCheckpoint?>(null) }
+    val ready = !isLoading && storageError == null
+    if (showHistory) {
+        ModalBottomSheet(onDismissRequest = { showHistory = false }) {
+            Text("历史对话", Modifier.padding(horizontal = 24.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                if (sessions.isEmpty()) item { Text("还没有已保存的对话", Modifier.padding(16.dp)) }
+                items(sessions, key = { it.sessionId }) { saved ->
+                    Surface(onClick = { showHistory = false; onSelectSession(saved.sessionId) },
+                        color = if (saved.sessionId == currentSessionId) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                            Text(saved.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                            Text(java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA).format(java.util.Date(saved.updatedAt)),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    resumeConfirmation?.let { task ->
+        AlertDialog(onDismissRequest = { resumeConfirmation = null }, title = { Text("继续这个任务？") },
+            text = { Column {
+                Text(task.goal.take(500))
+                Spacer(Modifier.height(12.dp))
+                Text(if (task.pendingTool != null) "上一个动作可能已经执行，但结果尚未保存。请先核对当前应用，避免重复发送、付款或修改。" else "会重新观察手机当前界面，从保存的进度规划剩余工作。已发生的操作不会自动撤销。")
+                task.steps.takeLast(3).forEach { Text("• ${it.title}", style = MaterialTheme.typography.bodySmall) }
+            } },
+            confirmButton = { TextButton(onClick = { resumeConfirmation = null; onResumeTask(task.taskId) }) { Text("已核对，继续任务") } },
+            dismissButton = { TextButton(onClick = { resumeConfirmation = null }) { Text("暂不继续") } })
+    }
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size, activeSteps.size, isProcessing) {
         val count = messages.size + if (isProcessing) 1 else 0
@@ -59,7 +103,10 @@ fun AssistantScreen(
                 Text("Pocket Agent", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text("你的手机任务助手", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onNewChat, enabled = !isProcessing) {
+            IconButton(onClick = { showHistory = true }, enabled = !isProcessing && ready) {
+                Icon(Icons.Default.History, contentDescription = "历史对话")
+            }
+            IconButton(onClick = onNewChat, enabled = !isProcessing && ready) {
                 Icon(Icons.Default.Add, contentDescription = "新建对话")
             }
         }
@@ -76,6 +123,28 @@ fun AssistantScreen(
                 modifier = Modifier.clickable(onClick = onOpenSettings).widthIn(max = 170.dp), maxLines = 1)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+        if (isLoading) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("正在读取本地会话…", Modifier.padding(horizontal = 22.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+        }
+        storageError?.let { error ->
+            Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(error, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onRetryStorage, enabled = !isLoading && !isProcessing) { Text("重试本地保存与读取") }
+                }
+            }
+        }
+        if (!isProcessing && !isLoading && checkpoint?.canResume == true) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp)) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(if (checkpoint.status == "INTERRUPTED") "已恢复中断的任务" else "可以继续上次任务", fontWeight = FontWeight.Medium)
+                    Text(checkpoint.goal, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                    TextButton(onClick = { resumeConfirmation = checkpoint }, enabled = ready) { Text("继续任务") }
+                }
+            }
+        }
         if (messages.isEmpty() && !isProcessing) {
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
@@ -124,7 +193,7 @@ fun AssistantScreen(
                     TextField(value = inputText, onValueChange = { inputText = it },
                         placeholder = { Text("告诉我，你想完成什么…", fontSize = 14.sp) },
                         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp, max = 140.dp),
-                        enabled = !isProcessing, maxLines = 5,
+                        enabled = !isProcessing && ready, maxLines = 5,
                         colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                             disabledContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
                             disabledIndicatorColor = Color.Transparent))
@@ -137,7 +206,7 @@ fun AssistantScreen(
                             if (isProcessing) onStopTask() else if (inputText.isNotBlank()) {
                                 val prompt = inputText.trim(); inputText = ""; onSendMessage(prompt)
                             }
-                        }, enabled = isProcessing || inputText.isNotBlank(), modifier = Modifier.size(40.dp), shape = CircleShape) {
+                        }, enabled = isProcessing || (ready && inputText.isNotBlank()), modifier = Modifier.size(40.dp), shape = CircleShape) {
                             Icon(if (isProcessing) Icons.Default.Stop else Icons.Default.ArrowUpward,
                                 contentDescription = if (isProcessing) "停止任务" else "发送任务", modifier = Modifier.size(21.dp))
                         }
@@ -182,6 +251,7 @@ private fun MessageItem(message: AiMessage, onConfirmPlan: (ActionPlan) -> Unit,
                 "NEEDS_USER" -> "需要你接手"
                 "BLOCKED", "INCOMPLETE" -> "尚未完成"
                 "CANCELLED" -> "已停止"
+                "INTERRUPTED" -> "任务已中断"
                 else -> "Pocket Agent"
             }
             Text(label, style = MaterialTheme.typography.labelMedium,
@@ -355,6 +425,7 @@ fun ActionPlanPreviewCard(
                         text = when (plan.status) {
                             PlanStatus.SUCCESS -> "✓ 已确认并成功移入回收站"
                             PlanStatus.CANCELLED -> "✗ 用户已取消此操作"
+                            PlanStatus.STALE -> "旧计划已过期，请重新扫描并生成确认卡片"
                             else -> "状态: ${plan.status.name}"
                         },
                         fontSize = 12.sp,

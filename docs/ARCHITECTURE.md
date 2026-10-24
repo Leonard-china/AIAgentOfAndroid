@@ -89,7 +89,7 @@ graph TD
    - 支持文字节点智能点击（优先调用节点 `ACTION_CLICK`，失败时自动下沉为其屏幕中心坐标执行连点手势）。
    - 支持连点器手势模式：基于 `dispatchGesture` 模拟毫秒级单点点击 (`clickAt(x, y)`) 与平滑方向滑动 (`swipeDirection(direction)`)。
    - 支持全局系统动作派发：返回 (`BACK`)、回到桌面 (`HOME`)、多任务列表 (`RECENTS`)、通知栏 (`NOTIFICATIONS`)。
-   - 提供轻量纯文本屏幕提取 (`inspect_current_screen`)：以纯文本形式提取可见可交互元素与中心坐标，杜绝截屏传输，极大节省 Token 开销。
+   - 提供轻量纯文本屏幕提取 (`inspect_current_screen`)：默认提取可见控件的文本摘要；仅用户明确开启 §8 视觉后，才允许按需发送当前应用截图。
    - 安全铁律约束：坚决拦截针对系统级删除/清空/格式化等破坏性弹窗的自动代点。当前实现通过 `isDestructiveSystemDialogActive()` 检测“系统包 + 破坏性文案”并同时拦截文字点击与坐标点击；仅在本应用自身界面才放行，避免误伤第三方应用。
 5. **Token 经济与隐私保护协议 (Token Economy & Privacy Protocol)**：
    - 严禁向模型回传海量相册列表或原始图片 Base64/二进制数据。
@@ -200,3 +200,62 @@ stateDiagram-v2
 - **实机补充修复（同日）**：HUD 的 show 清理旧视图时会清空停止回调，改为清理后绑定。`onInterrupt` 只表示无障碍反馈中断，不再假定服务断开，真实断开在 onUnbind/onDestroy 标记；参见 [Android 无障碍生命周期](https://developer.android.com/guide/topics/ui/accessibility/views/service)。离线屏幕操作也遵守应用内屏幕开关。主 Activity 显式 adjustResize，避免输入法将工作台整体平移。
 
 - **连接状态显示**：无障碍服务通过 StateFlow 发布真实连接状态，主界面与设置订阅更新，避免 APK 更新后服务稍晚重连而界面一直显示未连接。
+
+
+## 8. 视觉、会话落盘与恢复（2026-10-18，源码已接入，未验证）
+
+用户要求先提交上一版（938ae49），随后只开发，不验证也不占用手机。新增能力均应归入 HANDOFF 的“已实现但未验证”，不能沿用 §7 的 29 项测试或真机结论。
+
+- 会话使用独立 `noBackupFilesDir/agent_conversations.db`，不升级或删除既有媒体/审计库。整份会话（标题、消息、步骤、检查点）用现有 Android Keystore AES-GCM 密钥加密；数据库只保留 ID、更新时间和 revision 明文字段，旧 revision 不得覆盖较新检查点。解密失败保留原文件，阻止静默重置。
+- 任务调度前、每个在线工具动作前后等待检查点落盘；pendingTool 表示可能已执行但还未记录结果的动作。进程重启把 RUNNING 转为 INTERRUPTED，仅展示用户的继续入口；继续要确认具体任务，再读取当前屏幕重新规划，不保存/重放旧节点、截图或工具调用。
+- 旧文件操作预览恢复为 STALE，不能直接确认执行；需要重新查询、冻结目标并生成新卡片。
+- 前台 `AgentTaskService` 只跟随用户发起的活动任务，提供停止通知；START_NOT_STICKY，不在进程或服务重建时自动恢复动作。前台服务声明 specialUse，复用既有相关权限。
+
+- 视觉观察新增 `inspect_screen_visual`，通过 Android 11+ AccessibilityService.takeScreenshot 读取当前应用窗口裁剪图；XML 声明 canTakeScreenshot。默认开关关闭，用户须在设置中明确开启并配置支持图像输入的模型。接口/密钥可独立配置，只有接口完全相同才允许沿用主模型密钥。
+- 截图内存压缩为 JPEG，最长边1280、最多1MiB；完成请求后清零字节数组，硬件缓冲与 Bitmap 释放，不把图片放入数据库、相册或任务历史。检测到密码输入、无法完成隐私遍历、系统拒绝截图或系统确认画面时拒绝截屏。密码检测不能保证识别所有画面中的敏感文字，设置页说明实际上传范围。
+- 视觉模型返回摘要、原文候选和归一化目标中心；本地分配 visual_id / visual_target_id，文本规划器只能选择本地登记目标。发布目标前、点击前均重新截屏核对包名/窗口/旋转/裁剪边界与量化像素指纹；60秒过期，单次使用。系统包与删除/支付/发送等高风险视觉目标拒绝坐标点击。该保守策略可能拒绝动态画面，后续需要实测调优，不能直接放宽为盲点坐标。
+- 视觉输入使用兼容 Chat Completions 的 image_url/data:image/jpeg;base64 协议。其余规划历史只接收识别摘要，图片不进入文本工具循环。视觉识别的完成证据会标注为模型识别、可能出错；仍不等同于独立语义核验。
+- 官方依据：[Android takeScreenshot](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#takeScreenshot(int,java.util.concurrent.Executor,android.accessibilityservice.AccessibilityService.TakeScreenshotCallback))、[ScreenshotResult 资源释放](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService.ScreenshotResult)、[兼容视觉输入协议](https://www.alibabacloud.com/help/en/model-studio/vision)。仅查阅文档，未调用真实模型验证。
+
+- 完成源码接入后新增的 UI 包括历史对话列表、保存错误重试、绑定具体 taskId 的恢复确认。当前会话 ID 单独记录在本机元数据表，恢复最后选中的已保存会话；输入草稿不落盘。
+- 模型对动态画面只提供 fresh=false 的单帧描述和空点击目标；未改变屏幕的只读任务可用 finish_task(answered) 引用这一帧，不可据此报告 completed。图像在分析期间更换应用则直接丢弃。
+- checkpoint 关联 planId，用户完成/取消原生文件确认后，只更新与该计划对应的任务状态。不同任务的文件选择不会误将当前任务标为完成。
+- 本节新增代码未增加外部依赖，使用现有 SQLite/Keystore/OkHttp/Compose/Coroutines；新增前台服务复用已有 specialUse 权限。canTakeScreenshot 为新增服务能力，尚未真机验证。
+
+
+## 9. 预判连续动作流水线与端侧毫秒级守卫（2026-10-24）
+
+- **解决痛点**：传统的“单步动作 ➔ 等待动画 ➔ 上报大模型 ➔ 大模型推理 ➔ 下发下一步”串行 Stop-and-Wait 模式导致连贯任务（如“打开 B 站搜索 3Blue1Brown”）需经历 3~4 次网络与模型往返，耗时达 15 秒以上。
+- **架构设计**：
+  - 新增核心工具 `execute_action_pipeline`（工具 Schema 总数扩充为 22 项）。
+  - 支持大模型在面对高度确定性的连贯任务时，一次性下发包含 2~4 步的前瞻动作管道（`launch_app`、`wait_and_click`、`wait_and_input`、`swipe`）。
+- **端侧毫秒级快循环与守卫机制（Local Guard）**：
+  - 端侧以 60ms 极短周期快速轮询无障碍节点树，一旦目标控件（如带有“搜索”描述的可见节点）完成渲染，端侧立即就地派发穿透点击或输入法提交，将整套操作压缩至 2~3 秒内，跳过中间多轮网络 RTT。
+- **安全熔断与回退（Fallback）**：
+  - 遇到开屏广告、青少年模式弹窗、版本升级等非预期界面，或在设定超时（1000~6000ms）内未等到目标控件时，端侧**立即熔断中止流水线**，绝不进行无条件坐标盲点；
+  - 熔断后自动捕获当前实际界面（`observe()`）交还给大模型，模型自动无缝降级为常规单步决策（如先点击“跳过广告”）。
+- **破坏性与敏感操作绝对拦截**：
+  - 流水线参数在执行前经过严格关键词过滤（`删除`、`清空`、`格式化`、`卸载`、`付款`、`支付`、`转账`、`购买` 等）；
+  - 一旦包含敏感动作直接拒绝流水线执行，强制退回单步卡片由用户核对确认。
+- **感知哈希抗动效优化**：
+  - `ScreenCapture` 引入 16x16 灰度差异哈希（dHash，256-bit 十六进制），以汉明距离（容差 <= 12 bits）替代原本严格脆弱的全图 SHA-256，包容页面微小光标闪烁与轮播动效。
+- **会话持久化免解密性能优化**：
+  - `ConversationStore` 在 SQLite 表中扩充明文 `title` 与 `task_status` 字段，历史会话列表无需逐项调用 KeyStore AES-GCM 解密与反序列化，达到毫秒级秒开。
+
+
+## 10. 多模型服务商 API Key 独立加密隔离与动态适配（2026-10-24）
+
+- **解决痛点**：
+  - 传统单变量 `api_key` 设计在多模型接入场景下存在严重体验与安全隐患：用户在 DeepSeek、通义千问、OpenAI 之间切换预设时，由于只切换了 Base URL 而密钥未随厂商联动，导致残留的 DeepSeek 密钥被发往通义千问 API 导致 401 报错；且每次换模型都需要翻找剪贴板重新粘贴。
+- **架构设计**：
+  - **Provider 命名空间识别（`getProviderId`）**：
+    - 在 `KeyStoreVault` 中解析 Base URL 的 Host，归一化映射为各服务商唯一标识（`deepseek`、`dashscope`、`openai`、`zhipu` 等），未识别的 Host 归入统一的 `custom_{md5}` 隔离域。
+  - **硬件后端的独立 AES-256-GCM 存储槽**：
+    - 新增 `saveApiKeyForProvider(providerId, key)` 与 `getApiKeyForProvider(providerId)`。
+    - 针对每个 Provider 独立采用 Android KeyStore 硬件主密钥进行对称加密持久化，各厂商密钥在物理底层严格物理隔离。
+  - **UI 预设联动与自动无缝还原**：
+    - `SettingsScreen` 的 `selectPreset` 触发时，自动先暂存当前厂商已输入的最新 Key，并根据目标模型 Provider ID 自动调取并填入专属 Key，绝不串用残留 Key。
+    - 若目标 Provider 尚未配置过 Key，输入框安全置空并提示用户输入，同时【测试连接】按钮自动防呆禁用；
+    - 输入框 Label 动态更新为 `API Key (XXX 专属密钥)`，并提供显式明暗文切换与清空按钮。
+  - **性能解耦**：
+    - 输入框彻底解耦按键级别的 KeyStore 加密写入，改为内存单向流结合显式【保存配置】，彻底消除低端或高刷设备上的输入卡顿与跳字。

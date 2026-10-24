@@ -420,7 +420,7 @@ class FloatingAssistantService : Service() {
     private fun startNewChat() { conversation.newChat() }
 
     private fun handleUserPrompt(prompt: String) {
-        if (isProcessing || prompt.isBlank()) return
+        if (isProcessing || conversation.isLoading || conversation.storageError != null || prompt.isBlank()) return
         val trimmed = prompt.trim().removePrefix("➕").removePrefix("📌").removePrefix("👁️").trim()
         when (trimmed) {
             "开新对话", "新建对话", "清空对话", "重新开始" -> {
@@ -446,13 +446,17 @@ class FloatingAssistantService : Service() {
     }
 
     private fun executeActionPlan(plan: ActionPlan) {
+        if (isProcessing || conversation.isLoading || plan.status != PlanStatus.PREVIEW) return
         serviceScope.launch {
             plan.status = PlanStatus.EXECUTING
+            conversation.recordStateChange()
             val app = AIAgentApplication.instance
             val result = app.trashExecutor.prepareTrashRequest(plan)
 
             when (result) {
                 is TrashOperationExecutor.TrashResult.RequiresUserConsent -> {
+                    plan.status = PlanStatus.PREVIEW
+                    conversation.recordStateChange()
                     Toast.makeText(
                         this@FloatingAssistantService,
                         "系统安全限制：请点击进入主应用确认系统回收站弹窗",
@@ -461,7 +465,8 @@ class FloatingAssistantService : Service() {
                 }
                 is TrashOperationExecutor.TrashResult.Completed -> {
                     plan.status = PlanStatus.SUCCESS
-                    messages.add(
+                    conversation.resolvePlan(plan)
+                    conversation.recordMessage(
                         AiMessage(
                             sender = "ASSISTANT",
                             content = "✅ 操作成功！已将 ${plan.targets.size} 个文件移入回收站，预计释放 ${formatBytes(result.releasedBytes)}。"
@@ -470,7 +475,8 @@ class FloatingAssistantService : Service() {
                 }
                 is TrashOperationExecutor.TrashResult.Failed -> {
                     plan.status = PlanStatus.FAILED
-                    messages.add(
+                    conversation.resolvePlan(plan)
+                    conversation.recordMessage(
                         AiMessage(
                             sender = "ASSISTANT",
                             content = "❌ 操作失败: ${result.errorMessage}"
@@ -484,7 +490,8 @@ class FloatingAssistantService : Service() {
 
     private fun cancelActionPlan(plan: ActionPlan) {
         plan.status = PlanStatus.CANCELLED
-        messages.add(
+                    conversation.resolvePlan(plan)
+        conversation.recordMessage(
             AiMessage(
                 sender = "ASSISTANT",
                 content = "已取消本次操作计划。"
@@ -778,13 +785,13 @@ class FloatingAssistantService : Service() {
                                 onClick = {
                                     val trimmed = inputText.trim()
                                     if (isProcessing) {
-                                        AIAgentApplication.instance.orchestrator.cancelCurrentTask()
-                                    } else if (trimmed.isNotBlank()) {
+                                        conversation.stop()
+                                    } else if (trimmed.isNotBlank() && !conversation.isLoading && conversation.storageError == null) {
                                         inputText = ""
                                         handleUserPrompt(trimmed)
                                     }
                                 },
-                                enabled = inputText.isNotBlank() || isProcessing,
+                                enabled = isProcessing || (inputText.isNotBlank() && !conversation.isLoading && conversation.storageError == null),
                                 modifier = Modifier.size(36.dp)
                             ) {
                                 if (isProcessing) {

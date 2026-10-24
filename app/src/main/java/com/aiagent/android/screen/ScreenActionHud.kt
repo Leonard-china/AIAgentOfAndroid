@@ -312,6 +312,21 @@ object ScreenActionHud {
         }
     }
 
+    /** Hide only our HUD while acquiring a frame, then restore the same view if still attached. */
+    suspend fun <T> withoutOverlay(block: suspend () -> T): T {
+        val hidden = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            hudView?.also { it.visibility = View.INVISIBLE }
+        }
+        return try {
+            kotlinx.coroutines.delay(100)
+            block()
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.Main.immediate) {
+                if (hudView === hidden) hidden?.visibility = View.VISIBLE
+            }
+        }
+    }
+
     fun isShowing(): Boolean = hudView != null
 
     private fun runOnMain(block: () -> Unit) {
